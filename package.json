@@ -1,14 +1,16 @@
 {
-  "name": "pinger",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "@pcelvng/net",
+  "version": "0.2.1",
+  "description": "simple network diagnostic tools.",
+  "homepage": "https://github.com/pcelvng/simple-netjs",
+  "repository": "github:pcelvng/simple-netjs.git",
+  "main": "net.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "devDependencies": {
     "@types/node": "^10.9.3",
     "typescript": "^3.0.1"

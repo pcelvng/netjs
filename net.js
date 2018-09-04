@@ -1,7 +1,7 @@
 const dns = require("dns");
 
 const ping = require ("net-ping");
-// const publicIp = require('public-ip');
+const publicIp = require('public-ip');
 
 function doPings(options = {host: '', ip: '', numPings: 1}, pingerCallback) {
     let results = {
@@ -16,7 +16,7 @@ function doPings(options = {host: '', ip: '', numPings: 1}, pingerCallback) {
     };
 
     // numPings option
-    if (typeof options.numPings == 'number') {
+    if (typeof options.numPings === 'number') {
         // numPings must at least be 1 or greater.
         if (options.numPings < 1) {
             results.numPings = options.numPings;
@@ -109,7 +109,7 @@ module.exports.ping = function(address, pingCallback) {
 };
 
 // documentation at: https://www.npmjs.com/package/public-ip
-// module.exports.publicIp = publicIp.v4;
+module.exports.publicIp = publicIp.v4;
 // function publicIp(callback) {
 //     publicIp.v4().then(ip => {
 //         console.log(ip);
