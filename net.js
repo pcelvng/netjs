@@ -2,6 +2,7 @@ const dns = require("dns");
 
 const ping = require ("net-ping");
 const publicIp = require('public-ip');
+const netAddress = require('address');
 
 function doPings(options = {host: '', ip: '', numPings: 1}, pingerCallback) {
     let results = {
@@ -18,7 +19,7 @@ function doPings(options = {host: '', ip: '', numPings: 1}, pingerCallback) {
     // numPings option
     if (typeof options.numPings === 'number') {
         // numPings must at least be 1 or greater.
-        if (options.numPings < 1) {
+        if (options.numPings > 0) {
             results.numPings = options.numPings;
         }
     }
@@ -95,23 +96,111 @@ function doPingsDNS(options = {address: 'www.google.com', numPings: 1}, pingsCal
     });
 };
 
-module.exports.pings = doPingsDNS;
+// module.exports.pings = doPingsDNS;
+module.exports.pings = (pingsOptions = {}) => {
+    let pingerOptions = {
+        address: "",
+        numPings: 1,
+    };
+
+    if (typeof pingsOptions.address === "string") {
+        pingerOptions.address = pingsOptions.address;
+    }
+
+    if (typeof pingsOptions.numPings === "number") {
+        if (pingsOptions.numPings > 0) {
+            pingerOptions.numPings = pingsOptions.numPings;
+        }
+    }
+
+    return new Promise(
+        (resolve, reject) => {
+            doPingsDNS(pingerOptions, (error, results) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(results);
+                }
+            })
+        }
+    );
+};
 
 // ping is a simple wrapper around doPingsDNS for doing just
 // one ping. Ping is simpler and preferred if the user
 // just wants to do a single ping.
-module.exports.ping = function(address, pingCallback) {
-    var pingerOptions = {
-        address: address,
+module.exports.ping = (pingAddress) => {
+    let pingerOptions = {
+        address: pingAddress,
     };
 
-    doPingsDNS(pingerOptions, pingCallback);
+    return new Promise(
+        (resolve, reject) => {
+            doPingsDNS(pingerOptions, (error, results) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve(results);
+                }
+            })
+        }
+    );
 };
 
-// documentation at: https://www.npmjs.com/package/public-ip
-module.exports.publicIp = publicIp.v4;
-// function publicIp(callback) {
-//     publicIp.v4().then(ip => {
-//         console.log(ip);
-//     });
+// clientInfo contains some basic client network
+// information such as the internal ip, public ip,
+// and mac address of the internal ip. It may
+// get expanded to include more information in the
+// future.
+// clientCallback = (error, info) => {}
+// info = {
+//  mac: "",
+//  internalIp: "",
+//  publicIp: "",
 // }
+function clientInfo(clientCallback) {
+    let info = {
+        mac: "",
+        internalIp: "",
+        publicIp: "",
+    };
+
+    // addressPromise converts the
+    let addressPromise = new Promise(
+        (resolve, reject) => {
+            netAddress((addrErr, addrInfo) => {
+                if (addrErr) {
+                    reject(addrErr);
+                } else {
+                    resolve(addrInfo);
+                }
+            });
+        }
+    );
+
+    Promise.all([addressPromise, publicIp.v4()])
+    .then(([addrInfo, publicIp]) => {
+        info.mac = addrInfo.mac;
+        info.internalIp = addrInfo.ip;
+        info.publicIp = publicIp;
+        clientCallback(null, info);
+    })
+    .catch((err) => {
+        clientCallback(err, info);
+    });
+}
+
+// exported client info as a promise
+module.exports.clientInfo = function() {
+    return new Promise(
+        (resolve, reject) => {
+            clientInfo((err, info) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(info);
+                }
+            })
+        }
+    )
+};

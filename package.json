@@ -16,6 +16,8 @@
     "typescript": "^3.0.1"
   },
   "dependencies": {
+    "address": "^1.0.3",
+    "internal-ip": "^3.0.1",
     "isomorphic-ws": "^4.0.1",
     "net-ping": "^1.2.3",
     "promise": "^8.0.1",
