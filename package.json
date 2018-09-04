@@ -1,0 +1,24 @@
+{
+  "name": "pinger",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^10.9.3",
+    "typescript": "^3.0.1"
+  },
+  "dependencies": {
+    "isomorphic-ws": "^4.0.1",
+    "net-ping": "^1.2.3",
+    "promise": "^8.0.1",
+    "public-ip": "^2.4.0",
+    "websocket": "^1.0.26",
+    "ws": "^6.0.0"
+  }
+}
