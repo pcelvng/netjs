@@ -1,11 +1,11 @@
-let pinger = require("../pinger.js");
+let net = require("../net.js");
 
 let pingsOptions = {
     address: 'www.google.com',
     numPings: 3,
 };
 
-pinger.pings(pingsOptions, function(error, results) {
+net.pings(pingsOptions, function(error, results) {
    if (error) {
        console.log("error: " + error.toString());
    } else {
@@ -17,7 +17,7 @@ pinger.pings(pingsOptions, function(error, results) {
    }
 });
 
-pinger.ping('www.google.com', function(error, results) {
+net.ping('www.google.com', function(error, results) {
     if (error) {
         console.log("error: " + error.toString());
     } else {
