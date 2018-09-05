@@ -1,6 +1,6 @@
 {
   "name": "@pcelvng/net",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "simple network diagnostic tools.",
   "homepage": "https://github.com/pcelvng/simple-netjs",
   "repository": "github:pcelvng/simple-netjs.git",
@@ -8,7 +8,20 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": [
+    "ping",
+    "net-ping",
+    "net",
+    "netstats",
+    "gateway",
+    "network utils",
+    "pings",
+    "ip geo location",
+    "geo ip",
+    "public ip",
+    "mac address",
+    "network map"
+  ],
   "author": "rlball",
   "license": "MIT",
   "devDependencies": {
