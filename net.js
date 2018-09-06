@@ -1,6 +1,8 @@
 const dns = require("dns");
 
+const ip = require('ip');
 const iplocation = require('iplocation');
+const localdevices =  require('local-devices');
 const ping = require ("net-ping");
 const network = require('network');
 const arp = require('node-arp');
@@ -384,18 +386,140 @@ function httpChecks(destinations) {
     )
 }
 
+// TRACEROUTE SUPPORT
+// example hop object:
+// let hop = {
+//  host: "", // TODO: reverse dns lookup of ip to get host
+//  ip: "",
+//  isPublic: false, // if the ip is public or private
+//  ttl: 0,
+//  ms: 0, // ms roundtrip latency
+//  }
+function traceroute(host = "", ip = "") {
+    let trInfo = {
+        targetHost: host,
+        targetIP: host,
+        packetSize: 64,
+        hops: [],
+    };
+
+    // initialize ping session
+    let sessionOptions = {
+        // networkProtocol: ping.NetworkProtocol.IPv4,
+        packetSize: trInfo.packetSize, // default: 16
+        retries: 1,
+        // sessionId: (process.pid % 65535),
+        // timeout: 2000,
+        // ttl: 128 // different than the maxHops ttl value.
+    };
+
+    let maxHops = 64; // should be plenty
+    let session = ping.createSession(sessionOptions);
+
+    return new Promise(
+        (resolve, reject) => {
+            session.traceRoute (host, maxHops,
+                (error, target, ttl, sent, rcvd) => { // feed callback
+                    // note: when error is not a TimeExeededError
+                    // then its string value is the hop ip.
+                    let hopIp = target; // target is just the default. if error exists then
+                    let errMsg = "";
+                    if (error) {
+                        hopIp = error.source;
+
+                        if (!(error instanceof ping.TimeExceededError)) {
+                            errMsg = error.message;
+
+                            // in case the error.message is empty.
+                            if (errMsg === "") {
+                                errMsg = error.toString();
+                            }
+                        }
+                    }
+
+                    let isPublic = false; // user should check that the hopIp is not empty as well.
+                    let ms = rcvd - sent;
+
+                    // make sure the 'error' is a valid ip.
+                    if (ip.isV4Format(hopIp) === false) {
+                        hopIp = "" // error value not an ip
+                    } else {
+                        isPublic = ip.isPublic(hopIp);
+                    }
+
+                    let hop = {
+                        host: "", // TODO: reverse dns lookup of ip to get host
+                        ip: hopIp,
+                        isPublic: isPublic, // if the ip is public or private
+                        ttl: ttl,
+                        ms: ms, // ms roundtrip latency
+                        errMsg: errMsg,
+                    };
+
+                    trInfo.hops.push(hop); // add hop
+                },
+                (error, target) => { // done callback
+                    if (error) {
+                        reject(error);
+                    } else {
+                        resolve(trInfo);
+                    }
+                });
+        }
+    );
+}
+
+// tracerouteDns provides a simple dns lookup before passing on the
+// host and ip to traceroute.
+function tracerouteDns(host = "") {
+
+}
+
+
+
+
+
+// localNodes provides a full list of nodes on the local network
+// as well as trying to determine information about some of them
+// such as if the node is a gateway.
+function localNodes() {
+    return localdevices();
+    // let lNodes = {
+    //
+    // };
+    //
+    // let lNode = {
+    //     host: "",
+    //     ip: "",
+    //     mac: "",
+    //     roles: [], // string array of roles. (dns, router, gateway, unknown)
+    // };
+
+    // return new Promise(
+    //     (resolve, reject) => {
+    //         localdevices().then(
+    //             nodes => {
+    //                 resolve(nodes);
+    //             }
+    //         ).catch(
+    //             err => {
+    //                 reject(err);
+    //             }
+    //         );
+    //     }
+    // );
+}
+
+
 module.exports.ping = pingPromise;
 module.exports.pings = pingsPromise;
 module.exports.clientInfo = clientInfo;
 module.exports.gateway = gateway;
 module.exports.networkInfo = networkInfo;
+module.exports.localNodes = localNodes;
+module.exports.traceroute = traceroute;
 module.exports.httpCheck = httpCheck;
 module.exports.httpChecks = httpChecks;
-
-// TODO: local devices support.
-// let find =  require('local-devices');
-// Find all local network devices.
-// module.exports.devices = find();
 
 // TODO: add dns node support.
 // const netAddress = require('address');

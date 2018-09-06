@@ -2,8 +2,8 @@
   "name": "@pcelvng/net",
   "version": "0.4.1",
   "description": "simple network diagnostic tools.",
-  "homepage": "https://github.com/pcelvng/simple-netjs",
-  "repository": "github:pcelvng/simple-netjs.git",
+  "homepage": "https://github.com/pcelvng/netjs",
+  "repository": "github:pcelvng/netjs.git",
   "main": "net.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -20,7 +20,10 @@
     "geo ip",
     "public ip",
     "mac address",
-    "network map"
+    "network map",
+    "arp",
+    "icmp",
+    "network"
   ],
   "author": "rlball",
   "license": "MIT",
@@ -29,7 +32,10 @@
     "typescript": "^3.0.1"
   },
   "dependencies": {
+    "address": "^1.0.3",
+    "ip": "^1.1.5",
     "iplocation": "^5.0.1",
+    "local-devices": "^1.1.1",
     "net-ping": "^1.2.3",
     "network": "^0.4.1",
     "node-arp": "^1.0.6",
