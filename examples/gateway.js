@@ -45,3 +45,14 @@ net.internetGateway().then(
         console.log("gateway err: " + err.toString());
     }
 );
+
+// gateways returns all gateway on the way out to the internet.
+net.gateways().then(
+    gws => {
+        console.log(util.inspect(gws, false, null, true));
+    }
+).catch(
+    err => {
+        console.log("gateway err: " + err.toString());
+    }
+);
