@@ -1,6 +1,8 @@
 const dns = require("dns");
 
+const ip = require('ip');
 const iplocation = require('iplocation');
+const localdevices =  require('local-devices');
 const ping = require ("net-ping");
 const network = require('network');
 const arp = require('node-arp');
@@ -68,9 +70,9 @@ function doPings(options = {host: '', ip: '', numPings: 1}, pingerCallback) {
     pa();
 }
 
-// doPingsDNS is just a simple wrapper on top of doPings
+// doPingsDns is just a simple wrapper on top of doPings
 // but will do a dns lookup on the address.
-function doPingsDNS(options = {address: 'www.google.com', numPings: 1}, pingsCallback) {
+function doPingsDns(options = {address: '', numPings: 1}, pingsCallback) {
     // dns lookup wrapper
     dns.lookup(options.address, (error, ip, family) => {
         // results and doPing options are the same type of object.
@@ -119,7 +121,7 @@ function pingsPromise(pingsOptions = {}) {
 
     return new Promise(
         (resolve, reject) => {
-            doPingsDNS(pingerOptions, (error, results) => {
+            doPingsDns(pingerOptions, (error, results) => {
                 if (error) {
                     reject(error);
                 } else {
@@ -130,7 +132,7 @@ function pingsPromise(pingsOptions = {}) {
     );
 }
 
-// pingPromise is a simple wrapper around doPingsDNS for doing just
+// pingPromise is a simple wrapper around doPingsDns for doing just
 // one ping. Ping is simpler and preferred if the user
 // just wants to do a single ping.
 function pingPromise(pingAddress) {
@@ -140,7 +142,7 @@ function pingPromise(pingAddress) {
 
     return new Promise(
         (resolve, reject) => {
-            doPingsDNS(pingerOptions, (error, results) => {
+            doPingsDns(pingerOptions, (error, results) => {
                 if (error) {
                     reject(error);
                 } else {
@@ -180,22 +182,31 @@ function clientInfo() {
     );
 }
 
-// gateway will return the gateway ip
+// defaultGateway will return the client gateway ip
 // and mac address. If there is a problem
 // then will return as much information
 // as it's able to obtain. Therefore
 // there is no error but rather the
 // promise is resolved with as much information
 // as it can get.
-function gateway() {
+//
+// If the network has more than one NAT then the
+// client gateway will be different than the
+// internet gateway.
+function defaultGateway() {
+    // gwInfo is in the same format
+    // as a node object returned from the
+    // localNodes function.
     let gwInfo = {
+        hostName: "", // not implemented yet - but put here to be compatible with other node objects.
         ip: "",
-        mac: ""
+        mac: "",
+        roles: ["NAT", "Router"]
     };
 
     return new Promise(
         (resolve, reject) => {
-            network.get_gateway_ip((gwErr, ip) => {
+            network.get_gateway_ip((gwErr, gwIp) => {
                 if (gwErr) {
                     // if there is a problem, it's
                     // resolved with as much
@@ -204,14 +215,13 @@ function gateway() {
                     // resolve(gwInfo);
                     reject(gwErr);
                 } else {
-                    gwInfo.ip = ip;
-                    arp.getMAC(ip, (macErr, mac) => {
+                    gwInfo.ip = gwIp;
+                    arp.getMAC(gwIp, (macErr, mac) => {
                         if (macErr) {
                             // only able to get the ip. That's ok,
                             // just get what's possible.
-                            // console.log(macErr.toString());
-                            // resolve(gwInfo);
-                            reject(macErr);
+                            // reject(macErr);
+                            resolve(gwInfo);
                         } else {
                             gwInfo.mac = mac;
                             resolve(gwInfo);
@@ -219,6 +229,29 @@ function gateway() {
                     })
                 }
             })
+        }
+    );
+}
+
+// clientGateway is a convenience function for obtaining the
+// internet gateway by calling the 'nats' function and grabbing
+// the 'innermost' nat node. If the network has only one NAT then
+// the client gateway will also have the 'Gateway' role indicating
+// that it is also the gateway to the internet.
+function clientGateway() {
+    return new Promise(
+        (resolve, reject) => {
+            nats().then(
+                allNats => {
+                    if (allNats.length > 0) {
+                        resolve(allNats[0]); // always get the first
+                    }
+                }
+            ).catch(
+                nErr => {
+                    reject(nErr);
+                }
+            );
         }
     );
 }
@@ -256,9 +289,17 @@ function networkInfo() {
         // localDnsIp: "",
         // localDnsMac: "",
 
-        // gateway info
+        // internet gateway info
+        // if the internal network has
+        // more than one NAT then this gateway
+        // is the 'outermost' gateway or the gateway
+        // that leads to the internet.
+        //
+        // If there is more than one NAT then, at
+        // the moment this library is unable to obtain
+        // the mac address of the internet gateway.
         gatewayIp: "",
-        gatewayMac: "",
+        gatewayMac: "", // provided if obtainable.
 
         startAt: new Date(),
         doneAt: new Date(), // the done date is updated when complete
@@ -269,7 +310,7 @@ function networkInfo() {
         //  ip: "",
         //  mac: "",
         //  interface: "", // wireless, ethernet
-        //  roles: [], // list of devices roles (dns, nat, router, gateway)
+        //  roles: [], // list of devices roles (NAT, Router, Gateway)
         // }
         // localNodes:[], // list of local devices/network nodes. array of node objects.
     };
@@ -281,19 +322,23 @@ function networkInfo() {
                 netInfo.publicIp = pubIp;
 
                 // geo info
-                iplocation(pubIp).then(geo => {
-                    netInfo.city = geo.city;
-                    netInfo.state = geo.region_code;
-                    netInfo.country = geo.country;
-                    netInfo.zip = geo.postal;
-                    netInfo.isp = geo.org;
+                iplocation(pubIp).then(
+                    geo => {
+                        netInfo.city = geo.city;
+                        netInfo.state = geo.region_code;
+                        netInfo.country = geo.country;
+                        netInfo.zip = geo.postal;
+                        netInfo.isp = geo.org;
 
-                    resolve(netInfo);
-                }).catch(err => {
-                    // still resolve with the info
-                    // we have - public ip
-                    resolve(netInfo);
-                })
+                        resolve(netInfo);
+                    }
+                ).catch(
+                    err => {
+                        // still resolve with the info
+                        // we have - public ip
+                        resolve(netInfo);
+                    }
+                )
             }).catch(err => {
                 reject(err);
             });
@@ -302,7 +347,7 @@ function networkInfo() {
 
     return new Promise(
         (resolve, reject) => {
-            Promise.all([getGeoInfo, gateway()]).then(
+            Promise.all([getGeoInfo, internetGateway()]).then(
                 ([gInfo, gwInfo]) => {
                     netInfo.gatewayIp = gwInfo.ip;
                     netInfo.gatewayMac = gwInfo.mac;
@@ -384,19 +429,307 @@ function httpChecks(destinations) {
     )
 }
 
+// traceroute provides traceroute functionality similar
+// to 'traceroute' cli. While it will lookup all host names
+// associated with the ip it will not find all the ips. In
+// this way the returned ips represent the actual ips reported back
+// by each server along the way.
+function traceroute(host = "", hostIp = "") {
+    let trInfo = {
+        targetHost: host,
+        targetIp: hostIp,
+        packetSize: 64,
+        hops: [],
+    };
+
+    // initialize ping session
+    let sessionOptions = {
+        // networkProtocol: ping.NetworkProtocol.IPv4,
+        packetSize: trInfo.packetSize, // default: 16
+        retries: 1,
+        // sessionId: (process.pid % 65535),
+        // timeout: 2000,
+        // ttl: 128 // different than the maxHops ttl value.
+    };
+
+    let maxHops = 64; // should be plenty
+    let session = ping.createSession(sessionOptions);
+
+    return new Promise(
+        (resolve, reject) => {
+            session.traceRoute(hostIp, maxHops,
+                (error, target, ttl, sent, rcvd) => { // feed callback
+                    // note: when error is not a TimeExeededError
+                    // then its string value is the hop ip.
+                    let hopIp = target; // target is just the default. if error exists then
+                    let errMsg = "";
+                    if (error) {
+                        hopIp = error.source;
+
+                        if (!(error instanceof ping.TimeExceededError)) {
+                            errMsg = error.message;
+
+                            // in case the error.message is empty.
+                            if (errMsg === "") {
+                                errMsg = error.toString();
+                            }
+                        }
+                    }
+
+                    let isPublic = false; // user should check that the hopIp is not empty as well.
+                    let ms = rcvd - sent;
+
+                    // make sure the 'error' is a valid ip.
+                    if (ip.isV4Format(hopIp) === false) {
+                        hopIp = "" // error value not an ip
+                    } else {
+                        isPublic = ip.isPublic(hopIp);
+                    }
+
+                    let hop = {
+                        hostNames: [], // TODO: reverse dns lookup of ip to get host
+                        ip: hopIp,
+                        isPublic: isPublic, // if the ip is public or private
+                        ttl: ttl,
+                        ms: ms, // ms roundtrip latency
+                        errMsg: errMsg,
+                    };
+
+                    trInfo.hops.push(hop); // add hop
+                },
+                (error, target) => { // done callback
+                    if (error) {
+                        reject(error);
+                    } else {
+                        // reverse dns lookup for all public ip hops
+                        // in practice looking up all hops but ignoring
+                        // errors.
+                        let promises = []; // array of promises for reverse dns lookups.
+                        for (let i = 0; i < trInfo.hops.length; i++) {
+                            promises.push(reverseDns(trInfo.hops[i].ip));
+                        }
+
+                        Promise.all(promises).then(
+                            allHostNames => {
+                                // map all resolved hostNames back to each hop.
+                                // no resolved hostNames means the value is 'undefined'.
+                                for (let i = 0; i < trInfo.hops.length; i++) {
+                                    if (!(typeof allHostNames[i] === 'undefined')) {
+                                        trInfo.hops[i].hostNames = allHostNames[i];
+                                    }
+                                }
+                                resolve(trInfo);
+                            }
+                        ).catch(
+                            reverseDnsErr => {
+                                reject(reverseDnsErr);
+                            }
+                        );
+                    }
+                });
+        }
+    );
+}
+
+// reverseDns will return all the host names associated with a provided
+// ip address. If no ipAddress is provided then the promise is still not rejected
+// but rather resolved with no hostNames - empty array ([]). This way it's easier
+// and more friendly to perform a lot of lookups at one time without borking
+// the chain of promises.
+function reverseDns(ipAddress = "") { // returns promise
+    return new Promise(
+        (resolve) => {
+            if (ipAddress.length === 0) {
+                resolve([]);
+            } else {
+                dns.reverse(ipAddress, (revErr, hostNames) => {
+                    // ignore error so that if the promise is called with Promise.all
+                    // the rest will get a try.
+                    // if no hostNames are found then hostNames is 'undefined' so
+                    // normalize such as hostNames is always an array even if it's empty.
+                    if (typeof hostNames === 'undefined') {
+                        hostNames = [];
+                    }
+                    resolve(hostNames);
+                });
+            }
+        }
+    );
+}
+
+// tracerouteDns provides a simple dns lookup before passing on the
+// host and ip to traceroute.
+function tracerouteDns(host = "") {
+    // dns lookup wrapper
+    return new Promise(
+        (resolve, reject) => {
+            dns.lookup(host, (dnsError, hostIp, family) => {
+                if (dnsError) {
+                    reject(dnsError);
+                } else {
+                    traceroute(host, hostIp).then(
+                        trInfo => {
+                            resolve(trInfo);
+                        }
+                    ).catch(
+                        trError => {
+                            reject(trError);
+                        }
+                    );
+                }
+            });
+        }
+    );
+}
+
+// nats will attempt to find and return all the local network nates for the client
+// default gateway. If more than one nat is returned then that exit path is double nated.
+// The returned nat(s) are the same node objects as is provided from 'localNodes'.
+//
+// The nats are found by performing a traceroute and reporting the first x private
+// node hops. If the network is stacked with more than one nat then it is unlikely
+// that anything but the 'inner' nat mac address will be discoverable.
+function nats() {
+    return new Promise(
+        (resolve, reject) => {
+            tracerouteDns("www.google.com").then(
+                trInfo => {
+                    let nNodes = []; // nat nodes
+
+                    // iterate through the path until a public ip is found.
+                    // the private ips up until the first public ip are
+                    // nats.
+                    for (let i = 0; i < trInfo.hops.length; i++) {
+                        if (trInfo.hops[i].isPublic) {
+                            break;
+                        } else {
+                            // just get the first hostname - if any are reported
+                            let hostName = "";
+                            if (trInfo.hops[i].hostNames.length > 0) {
+                                hostName = trInfo.hops[i].hostNames[0];
+                            }
+
+                            nNodes.push({
+                                hostName: hostName,
+                                ip: trInfo.hops[i].ip,
+                                mac: "", // will lookup for only the 'inner' or first nat.
+
+                                // the inner nat will have the role of 'NAT' and 'Router'. The outermost
+                                // nat will have the 'NAT', 'Router' and 'Gateway' roles. The 'gateway'
+                                // in this case is being defined as the 'Gateway to the internet'.
+                                // in the weird case that there is one or more NATs in-between
+                                // the inner and internet gateway, the 'Router' and 'NAT' roles are assigned.
+                                //
+                                // all nats have the 'NAT' and 'Router' roles.
+                                roles: ["NAT", "Router"], // string array of roles. (dns, router, gateway, unknown)
+                            });
+                        }
+                    }
+
+                    // misc modifications
+                    if (nNodes.length > 0) {
+                        // update the outermost node by adding the
+                        // 'Gateway' role.
+                        nNodes[nNodes.length - 1].roles.push("Gateway");
+
+                        // attempt to find and record the MAC address of the innermost
+                        // NAT. Don't even try to find the MAC addresses of the other NATs
+                        // b/c there is not going to be access and even if somehow there were
+                        // access there could still be address collisions. Maybe there is another
+                        // trick to at least obtain the mac address of the internet gateway but
+                        // I don't know it.
+                        arp.getMAC(nNodes[0].ip, (macErr, mac) => {
+                            // just get what's possible. macErr is not
+                            // taken into consideration. If the mac is provided
+                            // then it is assigned.
+                            if (typeof mac === 'string') {
+                                nNodes[0].mac = mac;
+                            }
+                            resolve(nNodes);
+                        });
+                    }
+                }
+            ).catch(
+                trErr => {
+                    reject(trErr);
+                }
+            )
+        }
+    );
+}
+
+// internetGateway is a convenience function for obtaining the
+// internet gateway by calling the 'nats' function and grabbing
+// the 'outermost' nat node. The outermost nat node should also
+// be tagged with the 'Gateway' role. 'Gateway' in this context
+// indicates it is an internet gateway and not just a gateway to
+// another private network.
+function internetGateway() {
+    return new Promise(
+        (resolve, reject) => {
+            nats().then(
+                allNats => {
+                    if (allNats.length > 0) {
+                        resolve(allNats[allNats.length - 1]);
+                    }
+                }
+            ).catch(
+                nErr => {
+                    reject(nErr);
+                }
+            );
+        }
+    );
+}
+
+// localNodes provides a full list of nodes on the local network
+// as well as trying to determine information about some of them
+// such as if the node is a gateway.
+//
+// Note that if the local network is double nated then the 'outer' local
+// network nodes are not returned, only the 'inner' nodes.
+function localNodes() {
+    return localdevices();
+    // let lNodes = {
+    //
+    // };
+    //
+    // let lNode = {
+    //     hostName: "",
+    //     ip: "",
+    //     mac: "",
+    //     roles: [], // string array of roles. (dns, router, gateway, unknown)
+    // };
+
+    // return new Promise(
+    //     (resolve, reject) => {
+    //         localdevices().then(
+    //             nodes => {
+    //                 resolve(nodes);
+    //             }
+    //         ).catch(
+    //             err => {
+    //                 reject(err);
+    //             }
+    //         );
+    //     }
+    // );
+}
+
 module.exports.ping = pingPromise;
 module.exports.pings = pingsPromise;
 module.exports.clientInfo = clientInfo;
-module.exports.gateway = gateway;
+module.exports.clientGateway = clientGateway; // client gateway
+module.exports.defaultGateway = defaultGateway; // default gateway
+module.exports.internetGateway = internetGateway; // internet gateway
+module.exports.gateways = nats; // all gateways
 module.exports.networkInfo = networkInfo;
+module.exports.localNodes = localNodes;
+module.exports.traceroute = tracerouteDns;
+module.exports.reverseDns = reverseDns;
 module.exports.httpCheck = httpCheck;
 module.exports.httpChecks = httpChecks;
 
-// TODO: local devices support.
-// let find =  require('local-devices');
-// Find all local network devices.
-// module.exports.devices = find();
-
-// TODO: add dns node support.
+// TODO: add dns node support. Find the local network dns host.
 // const netAddress = require('address');
 // module.exports.dns = netAddress.dns;
