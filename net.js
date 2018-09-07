@@ -182,22 +182,31 @@ function clientInfo() {
     );
 }
 
-// gateway will return the gateway ip
+// defaultGateway will return the client gateway ip
 // and mac address. If there is a problem
 // then will return as much information
 // as it's able to obtain. Therefore
 // there is no error but rather the
 // promise is resolved with as much information
 // as it can get.
-function gateway() {
+//
+// If the network has more than one NAT then the
+// client gateway will be different than the
+// internet gateway.
+function defaultGateway() {
+    // gwInfo is in the same format
+    // as a node object returned from the
+    // localNodes function.
     let gwInfo = {
+        hostName: "", // not implemented yet - but put here to be compatible with other node objects.
         ip: "",
-        mac: ""
+        mac: "",
+        roles: ["NAT", "Router"]
     };
 
     return new Promise(
         (resolve, reject) => {
-            network.get_gateway_ip((gwErr, ip) => {
+            network.get_gateway_ip((gwErr, gwIp) => {
                 if (gwErr) {
                     // if there is a problem, it's
                     // resolved with as much
@@ -206,14 +215,13 @@ function gateway() {
                     // resolve(gwInfo);
                     reject(gwErr);
                 } else {
-                    gwInfo.ip = ip;
-                    arp.getMAC(ip, (macErr, mac) => {
+                    gwInfo.ip = gwIp;
+                    arp.getMAC(gwIp, (macErr, mac) => {
                         if (macErr) {
                             // only able to get the ip. That's ok,
                             // just get what's possible.
-                            // console.log(macErr.toString());
-                            // resolve(gwInfo);
-                            reject(macErr);
+                            // reject(macErr);
+                            resolve(gwInfo);
                         } else {
                             gwInfo.mac = mac;
                             resolve(gwInfo);
@@ -221,6 +229,29 @@ function gateway() {
                     })
                 }
             })
+        }
+    );
+}
+
+// clientGateway is a convenience function for obtaining the
+// internet gateway by calling the 'nats' function and grabbing
+// the 'innermost' nat node. If the network has only one NAT then
+// the client gateway will also have the 'Gateway' role indicating
+// that it is also the gateway to the internet.
+function clientGateway() {
+    return new Promise(
+        (resolve, reject) => {
+            nats().then(
+                allNats => {
+                    if (allNats.length > 0) {
+                        resolve(allNats[0]); // always get the first
+                    }
+                }
+            ).catch(
+                nErr => {
+                    reject(nErr);
+                }
+            );
         }
     );
 }
@@ -258,9 +289,17 @@ function networkInfo() {
         // localDnsIp: "",
         // localDnsMac: "",
 
-        // gateway info
+        // internet gateway info
+        // if the internal network has
+        // more than one NAT then this gateway
+        // is the 'outermost' gateway or the gateway
+        // that leads to the internet.
+        //
+        // If there is more than one NAT then, at
+        // the moment this library is unable to obtain
+        // the mac address of the internet gateway.
         gatewayIp: "",
-        gatewayMac: "",
+        gatewayMac: "", // provided if obtainable.
 
         startAt: new Date(),
         doneAt: new Date(), // the done date is updated when complete
@@ -271,7 +310,7 @@ function networkInfo() {
         //  ip: "",
         //  mac: "",
         //  interface: "", // wireless, ethernet
-        //  roles: [], // list of devices roles (dns, nat, router, gateway)
+        //  roles: [], // list of devices roles (NAT, Router, Gateway)
         // }
         // localNodes:[], // list of local devices/network nodes. array of node objects.
     };
@@ -283,19 +322,23 @@ function networkInfo() {
                 netInfo.publicIp = pubIp;
 
                 // geo info
-                iplocation(pubIp).then(geo => {
-                    netInfo.city = geo.city;
-                    netInfo.state = geo.region_code;
-                    netInfo.country = geo.country;
-                    netInfo.zip = geo.postal;
-                    netInfo.isp = geo.org;
+                iplocation(pubIp).then(
+                    geo => {
+                        netInfo.city = geo.city;
+                        netInfo.state = geo.region_code;
+                        netInfo.country = geo.country;
+                        netInfo.zip = geo.postal;
+                        netInfo.isp = geo.org;
 
-                    resolve(netInfo);
-                }).catch(err => {
-                    // still resolve with the info
-                    // we have - public ip
-                    resolve(netInfo);
-                })
+                        resolve(netInfo);
+                    }
+                ).catch(
+                    err => {
+                        // still resolve with the info
+                        // we have - public ip
+                        resolve(netInfo);
+                    }
+                )
             }).catch(err => {
                 reject(err);
             });
@@ -304,7 +347,7 @@ function networkInfo() {
 
     return new Promise(
         (resolve, reject) => {
-            Promise.all([getGeoInfo, gateway()]).then(
+            Promise.all([getGeoInfo, internetGateway()]).then(
                 ([gInfo, gwInfo]) => {
                     netInfo.gatewayIp = gwInfo.ip;
                     netInfo.gatewayMac = gwInfo.mac;
@@ -514,8 +557,6 @@ function reverseDns(ipAddress = "") { // returns promise
     );
 }
 
-
-
 // tracerouteDns provides a simple dns lookup before passing on the
 // host and ip to traceroute.
 function tracerouteDns(host = "") {
@@ -541,13 +582,112 @@ function tracerouteDns(host = "") {
     );
 }
 
+// nats will attempt to find and return all the local network nates for the client
+// default gateway. If more than one nat is returned then that exit path is double nated.
+// The returned nat(s) are the same node objects as is provided from 'localNodes'.
+//
+// The nats are found by performing a traceroute and reporting the first x private
+// node hops. If the network is stacked with more than one nat then it is unlikely
+// that anything but the 'inner' nat mac address will be discoverable.
+function nats() {
+    return new Promise(
+        (resolve, reject) => {
+            tracerouteDns("www.google.com").then(
+                trInfo => {
+                    let nNodes = []; // nat nodes
 
+                    // iterate through the path until a public ip is found.
+                    // the private ips up until the first public ip are
+                    // nats.
+                    for (let i = 0; i < trInfo.hops.length; i++) {
+                        if (trInfo.hops[i].isPublic) {
+                            break;
+                        } else {
+                            // just get the first hostname - if any are reported
+                            let hostName = "";
+                            if (trInfo.hops[i].hostNames.length > 0) {
+                                hostName = trInfo.hops[i].hostNames[0];
+                            }
 
+                            nNodes.push({
+                                hostName: hostName,
+                                ip: trInfo.hops[i].ip,
+                                mac: "", // will lookup for only the 'inner' or first nat.
 
+                                // the inner nat will have the role of 'NAT' and 'Router'. The outermost
+                                // nat will have the 'NAT', 'Router' and 'Gateway' roles. The 'gateway'
+                                // in this case is being defined as the 'Gateway to the internet'.
+                                // in the weird case that there is one or more NATs in-between
+                                // the inner and internet gateway, the 'Router' and 'NAT' roles are assigned.
+                                //
+                                // all nats have the 'NAT' and 'Router' roles.
+                                roles: ["NAT", "Router"], // string array of roles. (dns, router, gateway, unknown)
+                            });
+                        }
+                    }
+
+                    // misc modifications
+                    if (nNodes.length > 0) {
+                        // update the outermost node by adding the
+                        // 'Gateway' role.
+                        nNodes[nNodes.length - 1].roles.push("Gateway");
+
+                        // attempt to find and record the MAC address of the innermost
+                        // NAT. Don't even try to find the MAC addresses of the other NATs
+                        // b/c there is not going to be access and even if somehow there were
+                        // access there could still be address collisions. Maybe there is another
+                        // trick to at least obtain the mac address of the internet gateway but
+                        // I don't know it.
+                        arp.getMAC(nNodes[0].ip, (macErr, mac) => {
+                            // just get what's possible. macErr is not
+                            // taken into consideration. If the mac is provided
+                            // then it is assigned.
+                            if (typeof mac === 'string') {
+                                nNodes[0].mac = mac;
+                            }
+                            resolve(nNodes);
+                        });
+                    }
+                }
+            ).catch(
+                trErr => {
+                    reject(trErr);
+                }
+            )
+        }
+    );
+}
+
+// internetGateway is a convenience function for obtaining the
+// internet gateway by calling the 'nats' function and grabbing
+// the 'outermost' nat node. The outermost nat node should also
+// be tagged with the 'Gateway' role. 'Gateway' in this context
+// indicates it is an internet gateway and not just a gateway to
+// another private network.
+function internetGateway() {
+    return new Promise(
+        (resolve, reject) => {
+            nats().then(
+                allNats => {
+                    if (allNats.length > 0) {
+                        resolve(allNats[allNats.length - 1]);
+                    }
+                }
+            ).catch(
+                nErr => {
+                    reject(nErr);
+                }
+            );
+        }
+    );
+}
 
 // localNodes provides a full list of nodes on the local network
 // as well as trying to determine information about some of them
 // such as if the node is a gateway.
+//
+// Note that if the local network is double nated then the 'outer' local
+// network nodes are not returned, only the 'inner' nodes.
 function localNodes() {
     return localdevices();
     // let lNodes = {
@@ -555,7 +695,7 @@ function localNodes() {
     // };
     //
     // let lNode = {
-    //     host: "",
+    //     hostName: "",
     //     ip: "",
     //     mac: "",
     //     roles: [], // string array of roles. (dns, router, gateway, unknown)
@@ -579,7 +719,10 @@ function localNodes() {
 module.exports.ping = pingPromise;
 module.exports.pings = pingsPromise;
 module.exports.clientInfo = clientInfo;
-module.exports.gateway = gateway;
+module.exports.clientGateway = clientGateway; // client gateway
+module.exports.defaultGateway = defaultGateway; // default gateway
+module.exports.internetGateway = internetGateway; // internet gateway
+module.exports.gateways = nats; // all gateways
 module.exports.networkInfo = networkInfo;
 module.exports.localNodes = localNodes;
 module.exports.traceroute = tracerouteDns;
