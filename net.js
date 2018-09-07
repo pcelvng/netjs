@@ -1,4 +1,5 @@
 const dns = require("dns");
+const os = require("os");
 
 const ip = require('ip');
 const iplocation = require('iplocation');
@@ -163,6 +164,10 @@ function clientInfo() {
         mac: "",
         ip: "",
         interfaceType: "", // wired, wireless
+        osUser: os.userInfo().username,
+        osHostname: os.hostname(),
+        osPlatform: os.platform(),
+        osPlatformVersion: os.release(),
     };
 
     return new Promise(
@@ -714,6 +719,58 @@ function localNodes() {
     //         );
     //     }
     // );
+}
+
+// httpUpSpeed performs an upload speed test to a specified
+// destination endpoint.
+// let options = {
+//     uploadUrl: "", // if empty will not perform an upload speed test
+//     // uploadContentType: "", // default is "application/octet-stream" // NEEDED???
+//     uploadSize: 1000, // upload size in bytes. The test will upload a random string of bytes of length uploadSize.
+//     uploadTimeout: 5, // timeout after specified seconds
+// }
+// }
+function httpUpSpeed(options) {
+    let stInfo = {
+        uploadUrl: "", // if empty will not perform an upload speed test
+        // uploadContentType: "", // default is "application/octet-stream" // NEEDED???
+        uploadSize: 1000, // upload size in bytes. The test will upload a random string of bytes of length uploadSize.
+        uploadTimeout: 5, // timeout after specified seconds
+    };
+
+    return new Promise(
+        (resolve, reject) => {
+            let formInfo = {
+                // Pass a simple key-value pair
+                my_field: 'my_value',
+                // Pass data via Buffers
+                my_buffer: Buffer.from([1, 2, 3]),
+                // Pass data via Streams
+                my_file: fs.createReadStream(__dirname + '/unicycle.jpg'),
+                // Pass multiple values /w an Array
+                attachments: [
+                    fs.createReadStream(__dirname + '/attachment1.jpg'),
+                    fs.createReadStream(__dirname + '/attachment2.jpg')
+                ],
+                // Pass optional meta-data with an 'options' object with style: {value: DATA, options: OPTIONS}
+                // Use case: for some types of streams, you'll need to provide "file"-related information manually.
+                // See the `form-data` README for more information about options: https://github.com/form-data/form-data
+                custom_file: {
+                    value:  fs.createReadStream('/dev/urandom'),
+                    options: {
+                        filename: 'topsecret.jpg',
+                        contentType: 'image/jpeg'
+                    }
+                }
+            };
+            request.post({url:'http://service.com/upload', formData: formInfo}, function optionalCallback(err, httpResponse, body) {
+                if (err) {
+                    return console.error('upload failed:', err);
+                }
+                console.log('Upload successful!  Server responded with:', body);
+            });
+        }
+    );
 }
 
 module.exports.ping = pingPromise;
