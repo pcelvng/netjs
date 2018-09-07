@@ -70,9 +70,9 @@ function doPings(options = {host: '', ip: '', numPings: 1}, pingerCallback) {
     pa();
 }
 
-// doPingsDNS is just a simple wrapper on top of doPings
+// doPingsDns is just a simple wrapper on top of doPings
 // but will do a dns lookup on the address.
-function doPingsDNS(options = {address: 'www.google.com', numPings: 1}, pingsCallback) {
+function doPingsDns(options = {address: '', numPings: 1}, pingsCallback) {
     // dns lookup wrapper
     dns.lookup(options.address, (error, ip, family) => {
         // results and doPing options are the same type of object.
@@ -121,7 +121,7 @@ function pingsPromise(pingsOptions = {}) {
 
     return new Promise(
         (resolve, reject) => {
-            doPingsDNS(pingerOptions, (error, results) => {
+            doPingsDns(pingerOptions, (error, results) => {
                 if (error) {
                     reject(error);
                 } else {
@@ -132,7 +132,7 @@ function pingsPromise(pingsOptions = {}) {
     );
 }
 
-// pingPromise is a simple wrapper around doPingsDNS for doing just
+// pingPromise is a simple wrapper around doPingsDns for doing just
 // one ping. Ping is simpler and preferred if the user
 // just wants to do a single ping.
 function pingPromise(pingAddress) {
@@ -142,7 +142,7 @@ function pingPromise(pingAddress) {
 
     return new Promise(
         (resolve, reject) => {
-            doPingsDNS(pingerOptions, (error, results) => {
+            doPingsDns(pingerOptions, (error, results) => {
                 if (error) {
                     reject(error);
                 } else {
@@ -386,19 +386,15 @@ function httpChecks(destinations) {
     )
 }
 
-// TRACEROUTE SUPPORT
-// example hop object:
-// let hop = {
-//  host: "", // TODO: reverse dns lookup of ip to get host
-//  ip: "",
-//  isPublic: false, // if the ip is public or private
-//  ttl: 0,
-//  ms: 0, // ms roundtrip latency
-//  }
-function traceroute(host = "", ip = "") {
+// traceroute provides traceroute functionality similar
+// to 'traceroute' cli. While it will lookup all host names
+// associated with the ip it will not find all the ips. In
+// this way the returned ips represent the actual ips reported back
+// by each server along the way.
+function traceroute(host = "", hostIp = "") {
     let trInfo = {
         targetHost: host,
-        targetIP: host,
+        targetIp: hostIp,
         packetSize: 64,
         hops: [],
     };
@@ -418,7 +414,7 @@ function traceroute(host = "", ip = "") {
 
     return new Promise(
         (resolve, reject) => {
-            session.traceRoute (host, maxHops,
+            session.traceRoute(hostIp, maxHops,
                 (error, target, ttl, sent, rcvd) => { // feed callback
                     // note: when error is not a TimeExeededError
                     // then its string value is the hop ip.
@@ -448,7 +444,7 @@ function traceroute(host = "", ip = "") {
                     }
 
                     let hop = {
-                        host: "", // TODO: reverse dns lookup of ip to get host
+                        hostNames: [], // TODO: reverse dns lookup of ip to get host
                         ip: hopIp,
                         isPublic: isPublic, // if the ip is public or private
                         ttl: ttl,
@@ -462,17 +458,87 @@ function traceroute(host = "", ip = "") {
                     if (error) {
                         reject(error);
                     } else {
-                        resolve(trInfo);
+                        // reverse dns lookup for all public ip hops
+                        // in practice looking up all hops but ignoring
+                        // errors.
+                        let promises = []; // array of promises for reverse dns lookups.
+                        for (let i = 0; i < trInfo.hops.length; i++) {
+                            promises.push(reverseDns(trInfo.hops[i].ip));
+                        }
+
+                        Promise.all(promises).then(
+                            allHostNames => {
+                                // map all resolved hostNames back to each hop.
+                                // no resolved hostNames means the value is 'undefined'.
+                                for (let i = 0; i < trInfo.hops.length; i++) {
+                                    if (!(typeof allHostNames[i] === 'undefined')) {
+                                        trInfo.hops[i].hostNames = allHostNames[i];
+                                    }
+                                }
+                                resolve(trInfo);
+                            }
+                        ).catch(
+                            reverseDnsErr => {
+                                reject(reverseDnsErr);
+                            }
+                        );
                     }
                 });
         }
     );
 }
 
+// reverseDns will return all the host names associated with a provided
+// ip address. If no ipAddress is provided then the promise is still not rejected
+// but rather resolved with no hostNames - empty array ([]). This way it's easier
+// and more friendly to perform a lot of lookups at one time without borking
+// the chain of promises.
+function reverseDns(ipAddress = "") { // returns promise
+    return new Promise(
+        (resolve) => {
+            if (ipAddress.length === 0) {
+                resolve([]);
+            } else {
+                dns.reverse(ipAddress, (revErr, hostNames) => {
+                    // ignore error so that if the promise is called with Promise.all
+                    // the rest will get a try.
+                    // if no hostNames are found then hostNames is 'undefined' so
+                    // normalize such as hostNames is always an array even if it's empty.
+                    if (typeof hostNames === 'undefined') {
+                        hostNames = [];
+                    }
+                    resolve(hostNames);
+                });
+            }
+        }
+    );
+}
+
+
+
 // tracerouteDns provides a simple dns lookup before passing on the
 // host and ip to traceroute.
 function tracerouteDns(host = "") {
-
+    // dns lookup wrapper
+    return new Promise(
+        (resolve, reject) => {
+            dns.lookup(host, (dnsError, hostIp, family) => {
+                if (dnsError) {
+                    reject(dnsError);
+                } else {
+                    traceroute(host, hostIp).then(
+                        trInfo => {
+                            resolve(trInfo);
+                        }
+                    ).catch(
+                        trError => {
+                            reject(trError);
+                        }
+                    );
+                }
+            });
+        }
+    );
 }
 
 
@@ -510,17 +576,17 @@ function localNodes() {
     // );
 }
 
-
 module.exports.ping = pingPromise;
 module.exports.pings = pingsPromise;
 module.exports.clientInfo = clientInfo;
 module.exports.gateway = gateway;
 module.exports.networkInfo = networkInfo;
 module.exports.localNodes = localNodes;
-module.exports.traceroute = traceroute;
+module.exports.traceroute = tracerouteDns;
+module.exports.reverseDns = reverseDns;
 module.exports.httpCheck = httpCheck;
 module.exports.httpChecks = httpChecks;
 
-// TODO: add dns node support.
+// TODO: add dns node support. Find the local network dns host.
 // const netAddress = require('address');
 // module.exports.dns = netAddress.dns;

@@ -23,7 +23,9 @@
     "network map",
     "arp",
     "icmp",
-    "network"
+    "network",
+    "dns",
+    "reverse-dns"
   ],
   "author": "rlball",
   "license": "MIT",
