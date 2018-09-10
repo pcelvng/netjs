@@ -1,6 +1,7 @@
 const dns = require("dns");
 const os = require("os");
 
+const EventEmitter = require('events');
 const ip = require('ip');
 const iplocation = require('iplocation');
 const localdevices =  require('local-devices');
@@ -8,6 +9,7 @@ const ping = require ("net-ping");
 const network = require('network');
 const arp = require('node-arp');
 const publicIp = require('public-ip');
+const speedtestNet = require('speedtest-net');
 const request = require('request');
 
 // doPings is a utility to do any number of pings.
@@ -721,53 +723,58 @@ function localNodes() {
     // );
 }
 
-// httpUpSpeed performs an upload speed test to a specified
+// speedTest performs an upload speed test to a specified
 // destination endpoint.
-// let options = {
-//     uploadUrl: "", // if empty will not perform an upload speed test
-//     // uploadContentType: "", // default is "application/octet-stream" // NEEDED???
-//     uploadSize: 1000, // upload size in bytes. The test will upload a random string of bytes of length uploadSize.
-//     uploadTimeout: 5, // timeout after specified seconds
-// }
-// }
-function httpUpSpeed(options) {
-    let stInfo = {
-        uploadUrl: "", // if empty will not perform an upload speed test
-        // uploadContentType: "", // default is "application/octet-stream" // NEEDED???
-        uploadSize: 1000, // upload size in bytes. The test will upload a random string of bytes of length uploadSize.
-        uploadTimeout: 5, // timeout after specified seconds
-    };
-
+// look at: https://github.com/nesk/network.js
+// let stOptions = {
+//     progressCb: (progress) => {}, // progress callback
+// };
+// let progress = {
+//     msg: "", // progress point message
+//     at: 0, // touch point number (progress point number)
+//     of: 0, // total number of touch points.
+//     perComplete: 0.00, // approximate percent complete.
+// };
+function speedTest(stOptions) {
     return new Promise(
         (resolve, reject) => {
-            let formInfo = {
-                // Pass a simple key-value pair
-                my_field: 'my_value',
-                // Pass data via Buffers
-                my_buffer: Buffer.from([1, 2, 3]),
-                // Pass data via Streams
-                my_file: fs.createReadStream(__dirname + '/unicycle.jpg'),
-                // Pass multiple values /w an Array
-                attachments: [
-                    fs.createReadStream(__dirname + '/attachment1.jpg'),
-                    fs.createReadStream(__dirname + '/attachment2.jpg')
-                ],
-                // Pass optional meta-data with an 'options' object with style: {value: DATA, options: OPTIONS}
-                // Use case: for some types of streams, you'll need to provide "file"-related information manually.
-                // See the `form-data` README for more information about options: https://github.com/form-data/form-data
-                custom_file: {
-                    value:  fs.createReadStream('/dev/urandom'),
-                    options: {
-                        filename: 'topsecret.jpg',
-                        contentType: 'image/jpeg'
-                    }
+            let totalProgress = 8.0;
+            let currentProgress = 0;
+
+            // p indicates returns a progress
+            // object with the current progress info.
+            let p = (pMsg) => {
+                let tp = ++currentProgress;
+
+                // for now it's a float string so that
+                // the precision stays forced at 2 decimal places.
+                let perComplete = ((tp/totalProgress) * 100).toFixed(2);
+                return {
+                    msg: pMsg,
+                    at: tp,
+                    of: totalProgress,
+                    perComplete: perComplete,
                 }
             };
-            request.post({url:'http://service.com/upload', formData: formInfo}, function optionalCallback(err, httpResponse, body) {
-                if (err) {
-                    return console.error('upload failed:', err);
-                }
-                console.log('Upload successful!  Server responded with:', body);
+
+            speedtestNet().on('data', stResult => {
+                resolve(stResult);
+            }).on('error', stErr => {
+                reject(stErr);
+            }).on('config', ()=> {
+                stOptions.progressCb(p("obtained server config"));
+            }).on('servers', servers => {
+                stOptions.progressCb(p("accessing list of speed test servers"));
+            }).on('bestservers', bestservers => {
+                stOptions.progressCb(p("found best speed test server"));
+            }).on('testserver', testserver => {
+                stOptions.progressCb(p("checking server"));
+            }).on('downloadspeed', speed => {
+                stOptions.progressCb(p("download speed: " + parseFloat(speed).toFixed(2)));
+            }).on('uploadspeed', speed => {
+                stOptions.progressCb(p("upload speed: " + parseFloat(speed).toFixed(2)));
+            }).on('done', dataOverload => {
+                stOptions.progressCb(p("speed test complete"));
             });
         }
     );
@@ -779,9 +786,10 @@ module.exports.clientInfo = clientInfo;
 module.exports.clientGateway = clientGateway; // client gateway
 module.exports.defaultGateway = defaultGateway; // default gateway
 module.exports.internetGateway = internetGateway; // internet gateway
-module.exports.gateways = nats; // all gateways
+module.exports.gateways = nats; // all gateways on the way out to the internet.
 module.exports.networkInfo = networkInfo;
 module.exports.localNodes = localNodes;
+module.exports.speedTest = speedTest;
 module.exports.traceroute = tracerouteDns;
 module.exports.reverseDns = reverseDns;
 module.exports.httpCheck = httpCheck;

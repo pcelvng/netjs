@@ -9,7 +9,7 @@ net.ping("www.google.com").then(pingResults => {
 
 let pingsOptions = {
     address: 'www.google.com',
-    numPings: 500,
+    numPings: 3,
 };
 
 net.pings(pingsOptions).then(pingResults => {
