@@ -1,4 +1,5 @@
 const dns = require("dns");
+const os = require("os");
 
 const ip = require('ip');
 const iplocation = require('iplocation');
@@ -7,6 +8,7 @@ const ping = require ("net-ping");
 const network = require('network');
 const arp = require('node-arp');
 const publicIp = require('public-ip');
+const speedtestNet = require('speedtest-net');
 const request = require('request');
 
 // doPings is a utility to do any number of pings.
@@ -163,6 +165,10 @@ function clientInfo() {
         mac: "",
         ip: "",
         interfaceType: "", // wired, wireless
+        osUser: os.userInfo().username,
+        osHostname: os.hostname(),
+        osPlatform: os.platform(),
+        osPlatformVersion: os.release(),
     };
 
     return new Promise(
@@ -716,15 +722,73 @@ function localNodes() {
     // );
 }
 
+// speedTest performs an upload speed test to a specified
+// destination endpoint.
+// look at: https://github.com/nesk/network.js
+// let stOptions = {
+//     progressCb: (progress) => {}, // progress callback
+// };
+// let progress = {
+//     msg: "", // progress point message
+//     at: 0, // touch point number (progress point number)
+//     of: 0, // total number of touch points.
+//     perComplete: 0.00, // approximate percent complete.
+// };
+function speedTest(stOptions) {
+    return new Promise(
+        (resolve, reject) => {
+            let totalProgress = 8.0;
+            let currentProgress = 0;
+
+            // p indicates returns a progress
+            // object with the current progress info.
+            let p = (pMsg) => {
+                let tp = ++currentProgress;
+
+                // for now it's a float string so that
+                // the precision stays forced at 2 decimal places.
+                let perComplete = ((tp/totalProgress) * 100).toFixed(2);
+                return {
+                    msg: pMsg,
+                    at: tp,
+                    of: totalProgress,
+                    perComplete: perComplete,
+                }
+            };
+
+            speedtestNet().on('data', stResult => {
+                resolve(stResult);
+            }).on('error', stErr => {
+                reject(stErr);
+            }).on('config', ()=> {
+                stOptions.progressCb(p("obtained server config"));
+            }).on('servers', servers => {
+                stOptions.progressCb(p("accessing list of speed test servers"));
+            }).on('bestservers', bestservers => {
+                stOptions.progressCb(p("found best speed test server"));
+            }).on('testserver', testserver => {
+                stOptions.progressCb(p("checking server"));
+            }).on('downloadspeed', speed => {
+                stOptions.progressCb(p("download speed: " + parseFloat(speed).toFixed(2)));
+            }).on('uploadspeed', speed => {
+                stOptions.progressCb(p("upload speed: " + parseFloat(speed).toFixed(2)));
+            }).on('done', dataOverload => {
+                stOptions.progressCb(p("speed test complete"));
+            });
+        }
+    );
+}
+
 module.exports.ping = pingPromise;
 module.exports.pings = pingsPromise;
 module.exports.clientInfo = clientInfo;
 module.exports.clientGateway = clientGateway; // client gateway
 module.exports.defaultGateway = defaultGateway; // default gateway
 module.exports.internetGateway = internetGateway; // internet gateway
-module.exports.gateways = nats; // all gateways
+module.exports.gateways = nats; // all gateways on the way out to the internet.
 module.exports.networkInfo = networkInfo;
 module.exports.localNodes = localNodes;
+module.exports.speedTest = speedTest;
 module.exports.traceroute = tracerouteDns;
 module.exports.reverseDns = reverseDns;
 module.exports.httpCheck = httpCheck;

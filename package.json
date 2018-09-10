@@ -1,6 +1,6 @@
 {
   "name": "@pcelvng/net",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "simple network diagnostic tools.",
   "homepage": "https://github.com/pcelvng/netjs",
   "repository": "github:pcelvng/netjs.git",
@@ -25,7 +25,11 @@
     "icmp",
     "network",
     "dns",
-    "reverse-dns"
+    "reverse-dns",
+    "speed test",
+    "traceroute",
+    "download speed",
+    "upload speed"
   ],
   "author": "rlball",
   "license": "MIT",
@@ -42,6 +46,7 @@
     "network": "^0.4.1",
     "node-arp": "^1.0.6",
     "public-ip": "^2.4.0",
-    "request": "^2.88.0"
+    "request": "^2.88.0",
+    "speedtest-net": "^1.4.3"
   }
 }
