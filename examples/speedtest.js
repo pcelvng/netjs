@@ -8,7 +8,11 @@ let stOptions = {
     },
 };
 
-// download speed over http
+// speed test is, for now, a simple wrapper around the awesome
+// speedtest-net library. In the future it is possible there will be support
+// for other speed test libraries as well as adding more options
+// and normalizing the results to be independent of the underlying
+// test driver.
 net.speedTest(stOptions).then(
     stResult => {
         console.log(util.inspect(stResult, false, null, true));
