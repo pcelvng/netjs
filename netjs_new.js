@@ -12,13 +12,6 @@ const speedtestNet = require('speedtest-net');
 const request = require('request');
 
 // TODO:
-// - ping
-// - pings
-// - clientInfo (or just call it client()?)
-// - localNetwork (full local network hosts)
-// - defaultGateway (copy over?)
-// - httpCheck
-// - httpChecks
 // - speedTest (normalize output and cut out speedTest.net specific fields)
 
 
@@ -52,11 +45,14 @@ function newHost() {
         // - "dhcp" (currently not supported - indicates host is also a dhcp server)
         // - "dns" (currently not supported - indicates the host is also a dns server)
         // - "proxy" (currently not supported - indicates the host is providing proxy services)
+        // - "remote" (host that is not on the local network and does not belong to the local network)
+        // - "device" (connected network device)
+        // - "client" (client host - where diagnostic is being run)
         //
         // if roles is an empty array then roles have not been discovered or
         // no roles are known which probably indicates the host is just another
         // client on the network such as a connected phone or desktop or laptop.
-        roles: [], // "nat", "gateway", "router", "dns", "public"
+        roles: [], // "nat", "gateway", "router", "dns", "public", "remote"
 
         // no dns entries returns an empty dns object
         //
@@ -264,6 +260,19 @@ function clientHost(cb) {
     })
 }
 
+// client contains information about the client host
+// as well as general information about the client machine.
+function client(cb) {
+    clientHost((hst) => {
+        cb({
+            host: hst,
+            os_user: os.userInfo().username,
+            os_hostname: os.hostname(),
+            os_platform: os.platform(),
+        });
+    });
+}
+
 // nats will provide the local network nats on
 // the outbound path to the internet. The nat
 // with the role 'gateway' is the internet gateway.
@@ -379,6 +388,64 @@ function coreLocalNetwork(cb) {
     });
 }
 
+function localNetwork(cb) {
+    coreLocalNetwork((hsts) => {
+        let coreCnt = hsts.length;
+
+        // add remaining misc nodes
+        localdevices().then(
+            devices => {
+                // translate 'devices' format to 'host' format
+                // and push to local host list.
+                for (let i = 0; i < devices.length; i++) {
+                    let h = newHost();
+                    let d = devices[i];
+                    if (d.name !== "?") {
+                        h.name = d.name;
+                    }
+                    h.ip = d.ip;
+                    h.mac = d.mac;
+                    h.roles = ["device"];
+
+                    // check that device host doesn't already exist
+                    // on the core network.
+                    // If it does exist check if the host name is available
+                    // and add it.
+                    let isCore = false;
+                    for (let j = 0; j < coreCnt; j++) {
+                        // check that the mac addresses are also the same
+                        // to rule out and 'outer' nat that doesn't have
+                        // a mac address but does have the same private ip
+                        // as a host on the 'inner' network.
+                        if (hsts[j].ip === h.ip && hsts[j].mac.length > 0) {
+                            isCore = true;
+
+                            if (hsts[j].name.length === 0 && h.name.length > 0) {
+                                hsts[j].name = h.name;
+                            }
+                        }
+                    }
+
+                    // only add device hosts if not already included in the
+                    // core local network.
+                    if (!isCore) {
+                        hsts.push(h);
+                    }
+
+                    // Note: not going to perform a vendor lookup since
+                    // vendor lookup is rate limited to 1 per second.
+                }
+
+                cb(hsts);
+            }
+        ).catch(
+            lErr => {
+                cb(hsts);
+            }
+        );
+    });
+}
+
 // traceroute provides low configuration traceroute functionality similar
 // to 'traceroute' cli. While it will lookup all host names
 // associated with the ip it will not find all the ips. In
@@ -463,11 +530,210 @@ function traceroute(destHst, cb) {
     });
 }
 
+function newPingsCfg() {
+    return {
+        target: '', // ping target; can be ip or hostname
+        num_pings: 1,
+    };
+}
+
+// pings is a utility to do any number of pings.
+// module.exports.pings = doPings;
+// - make sure to leave the http:// or https:// off of the address. So, instead of 'https://www.google.com'
+//   do 'www.google.com'. If it's not in the correct format then the callback will provide an error.
+// - make sure to leave off trailing paths ie don't do 'finance.yahoo.com/portfolios' but instead 'finance.yahoo.com/'.
+// - make sure to remove trailing slashes; ie don't do 'finance.yahoo.com/' but rather 'finance.yahoo.com'.
+// - make sure not provide a port; ie instead of 'www.google.com:80' just do 'www.google.com'.
+// - can provide just an ip address; ie '172.217.4.164' is just fine. If that's the case then the results.host and
+//   results.ip will contain the same value.
+//
+// cb = (result) => {}
+function pings(pingsCfg, cb) {
+    // create host to represent ping destination
+    let hst = newHost();
+    hst.roles = ['remote'];
+
+    // check if target is ip address or host name.
+    if (ip.isV4Format(pingsCfg.target)) {
+        hst.ip = pingsCfg.target;
+    } else {
+        hst.name = pingsCfg.target;
+    }
+
+    let result = {
+        packet_size: 64, // for now not an option.
+        ping_host: hst, // destination host
+        sent: 1, // num of pings sent; default is 1
+        returned: 0, // num of returned pings
+        loss: 0, // ping loss; sent - returned
+        min: 0, // min ping latency
+        max: 0, // max ping latency
+        avg: 0, // avg ping latency
+        jitter: 0, // jitter (std deviation) ping latency
+        pings: [], // array of numeric values representing millisecond ping latency
+    };
+
+    // numPings option
+    if (typeof pingsCfg.num_pings === 'number') {
+        // numPings must at least be 1 or greater.
+        if (pingsCfg.num_pings > 0) {
+            result.sent = pingsCfg.num_pings;
+        }
+    }
+
+    // get the target host ip - if needed
+    // not going to bother with reverse lookup.
+    hostIpLookup(hst, (hst) => {
+        hst.is_public = ip.isPublic();
+
+        // dest host geo lookup
+        hostGeoLookup(hst, (hst) => {
+            // initialize ping session
+            let session = netping.createSession({
+                // networkProtocol: ping.NetworkProtocol.IPv4,
+                packetSize: result.packetSize, // default: 16
+                retries: 0, // if not 0 then there appears to be weird side effects
+                // sessionId: (process.pid % 65535),
+                // timeout: 2000,
+                // ttl: 128
+            });
+
+            let cnt = 0;
+            let pa = () => {
+                session.pingHost(hst.ip, (error, target, sent, rcvd) => {
+                    if (!error) {
+                        result.pings.push(rcvd - sent);
+
+                        // stats
+                        result.returned = result.pings.length;
+                        result.loss = result.sent - result.returned;
+                        result.min = Math.min(...result.pings);
+                        result.max = Math.max(...result.pings);
+                        result.avg = (
+                            () => {
+                                let sum = 0.0;
+                                for (let i = 0; i < result.pings.length; i++) {
+                                    sum += result.pings[i];
+                                }
+
+                                return sum/result.pings.length;
+                            }
+                        )();
+
+                        // jitter is just a sample standard deviation
+                        // note: if there is just one ping then jitter is NaN.
+                        result.jitter = (
+                            () => {
+                                let sumSq = 0.0; // diff around the mean squared and summed.
+                                for (let i = 0; i < result.pings.length; i++) {
+                                    sumSq += Math.pow(result.pings[i] - result.avg, 2);
+                                }
+
+                                return Math.sqrt(sumSq /(result.pings.length-1)) // n = sample size - 1
+                            }
+                        )();
+                    }
+
+                    // recurse pings until complete
+                    cnt++;
+                    if (cnt < result.sent) { // sent is the total intended to send.
+                        pa();
+                    } else {
+                        cb(result);
+                    }
+                })
+            };
+
+            pa();
+        });
+    });
+}
+
+// ping is simple wrapper around pings. It just
+// does one ping.
+function ping(target, cb) {
+    let cfg = newPingsCfg();
+    cfg.target = target;
+    cfg.num_pings = 1;
+
+    pings(cfg, cb);
+}
+
+// pingUrl checks a single
+// http(s) endpoint for a 200 response.
+//
+// Notes:
+// - only supports the GET action method at the moment.
+// - expects exactly a 200 response code.
+// - does not follow redirects.
+// - the promise is only resolved. 'reject' is not called
+//   so that a single fail or bad destination doesn't get
+//   in the way of other destination checks.
+// - can accept http or https.
+//
+// should be a complete url such as
+// "http://www.google.com/path?var1=value1"
+// "https://www.google.com/path"
+// cb = (err, url) => {}
+function pingUrl(url, cb) {
+    request(url, (rErr, res, body) => {
+        if (rErr) {
+            cb(rErr, '');
+            return
+        }
+
+        if (res && res.statusCode === 200) {
+            cb(null, url);
+        } else {
+            cb(null, '');
+        }
+    });
+}
+
+// pingUrls is like pingUrl for an array of destinations.
+// destinations = array of http(s) destination strings.
+// cb = (err, urls) => {}
+function pingUrls(urls, cb) {
+    let p = (url) => {
+        return new Promise(
+            (resolve, reject) => {
+                pingUrl(url, (err, url) => {
+                    // TODO: consider passing on err
+                    resolve(url);
+                });
+            }
+        );
+    };
+
+    let promises = []; // pingUrl promises
+    for (let i = 0; i < urls.length; i++) {
+        promises.push(p(urls[i]));
+    }
+
+    Promise.all(promises).then(
+        urls => {
+            cb(null, urls);
+        }
+    ).catch(
+        pErr => {
+            cb(pErr, []);
+        }
+    );
+}
+
 module.exports.newHost = newHost;
 module.exports.hostNameLookup = hostNameLookup;
 module.exports.hostGeoLookup = hostGeoLookup;
 module.exports.hostVendorLookup = hostVendorLookup;
 module.exports.traceroute = traceroute;
 module.exports.publicHost = publicHost;
+module.exports.clientHost = clientHost;
+module.exports.client = client;
 module.exports.nats = nats;
 module.exports.coreLocalNetwork = coreLocalNetwork;
+module.exports.localNetwork = localNetwork;
+module.exports.newPingsCfg = newPingsCfg;
+module.exports.pings = pings;
+module.exports.ping = ping;
+module.exports.pingUrl = pingUrl;
+module.exports.pingUrls = pingUrls;
