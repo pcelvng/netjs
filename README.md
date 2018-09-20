@@ -75,7 +75,7 @@ const util = require('util');
 
 // hosts are represented by host objects.
 // generate a host object yourself like this:
-let myHost = net.newHost();
+let myHost = new net.Host();
 
 // you can set your host information and then augment it will various
 // host functions.
@@ -99,7 +99,7 @@ net.hostIpLookup(myHost, (myHost) => {
 // do a host name lookup. Can also work with private
 // ips if the local network has dns servers and
 // the private host has a dns host name.
-let h = net.newHost();
+let h = new net.Host();
 h.ip = "8.22.12.170"; // probably need to update the example with an ip that has a host name.
 h.is_public = true;
 
@@ -110,7 +110,7 @@ net.hostNameLookup(h, (hst) => {
 
 // if you have a host interface mac address then perform
 // a vendor string lookup (note: rate limited to 1 per second)
-let macHost = net.newHost();
+let macHost = new net.Host();
 macHost.mac = '8c:85:90:cd:ba:0e';
 
 // note: the 'macHost' in the callback is a reference
@@ -230,7 +230,7 @@ const net = require("../net.js");
 const util = require('util');
 
 // traceroute
-let destination = net.newHost();
+let destination = new net.Host();
 destination.name = "www.google.com";
 
 net.traceroute(destination, (err, hops) => {
