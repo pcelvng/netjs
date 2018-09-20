@@ -15,243 +15,183 @@ $ npm install @pcelvng/net --save
 All usage examples are located in the examples directory. Examples 
 are reproduced below for convenience.
 
-### clientinfo example
+### corelocalnetwork example
 
 ```js
 const net = require("../net.js");
 const util = require('util');
 
-net.clientInfo().then(cInfo => {
-    console.log(util.inspect(cInfo, false, null, true));
-}).catch(error => {
-    console.log("client info error: " + error.toString());
+// easily obtain the client host - the host where the test
+// is being run.
+net.clientHost((cHst) => {
+    console.log("client host object: ");
+    console.log(util.inspect(cHst, false, null, true));
+    console.log("");
+});
+
+// get the client host along with general information about the
+// client.
+net.client((clnt) => {
+    console.log("client host object and general client info: ");
+    console.log(util.inspect(clnt, false, null, true));
+    console.log("");
+});
+
+// get the network nats to discover if you have more than
+// one nat.
+// note: if the nat also has the 'gateway' role then
+// that is the nat that is the gateway to the internet.
+net.nats((nts) => {
+    console.log("local network nats: ");
+    console.log(util.inspect(nts, false, null, true));
+    console.log("");
+});
+
+// get the internet host which is the 'public' side
+// of the local nat. It's the host that has your local network
+// public ip address.
+// It's the only host relative to the client local network that
+// is public.
+// Other public hosts are designated with the 'remote' role. Meaning
+// they are remote to the client's local network.
+net.publicHost((pHst) => {
+    console.log("public host: ");
+    console.log(util.inspect(pHst, false, null, true));
+    console.log("");
+});
+
+// conveniently get the entire 'core local network'
+// in a single call.
+net.coreLocalNetwork((hsts) => {
+    console.log(util.inspect(hsts, false, null, true));
 });
 ```
 
-### gateway example
+### host example
 
 ```js
 const net = require("../net.js");
 const util = require('util');
 
-// defaultGateway provides the default gateway as reported by the client
-// os.
-// The default gateway will not attempt to understand if it is also
-// the internet gateway and will therefore not have the 'Gateway' role.
-// Maybe this will get added in a future version.
-net.defaultGateway().then(
-    dgwInfo => {
-        console.log(util.inspect(dgwInfo, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("gateway err: " + err.toString());
-    }
-);
+// hosts are represented by host objects.
+// generate a host object yourself like this:
+let myHost = net.newHost();
 
-// clientGateway will provide the first gateway on the
-// way out to the internet. It will likely be the only
-// gateway on the way out unless the network has more
-// than one NAT going out to the internet.
-//
-// if the clientGateway is also the internet gateway
-// then the 'Gateway' role will also be present.
-net.clientGateway().then(
-  cgwInfo => {
-      console.log(util.inspect(cgwInfo, false, null, true));
-  }
-).catch(
-    err => {
-        console.log("gateway err: " + err.toString());
-    }
-);
+// you can set your host information and then augment it will various
+// host functions.
+myHost.name = 'www.google.com';
 
-// internetGateway will return the gateway to the internet.
-// If the local network has more than one NAT then this will
-// be different than the client gateway.
-net.internetGateway().then(
-    igwInfo => {
-        console.log(util.inspect(igwInfo, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("gateway err: " + err.toString());
-    }
-);
+// with just a host do an ip lookup
+// note: the 'myHost' in the callback is a reference
+// to the same object.
+net.hostIpLookup(myHost, (myHost) => {
+    console.log("myHost with ip address: ");
+    console.log(util.inspect(myHost, false, null, true));
 
-// gateways returns all gateway on the way out to the internet.
-net.gateways().then(
-    gws => {
-        console.log(util.inspect(gws, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("gateway err: " + err.toString());
-    }
-);
-```
-
-### httpchecks example
-
-```js
-let net = require("../net.js");
-
-// can reach destination
-net.httpCheck("http://www.google.com:80").then(
-    destination => {
-        if (destination.length > 0) {
-            console.log("success at destination: " + destination);
-        } else {
-            console.log("destination was not reached");
-        }
-    }
-).catch(
-    err => {
-        console.log("err at destination: " + err.toString());
-    }
-);
-
-// cannot reach destination - still comes
-// back as successful but the destination value
-// is empty.
-net.httpCheck("http://www.google.com:8000").then(
-    destination => {
-        if (destination.length > 0) {
-            console.log("success at destination: " + destination);
-        } else {
-            console.log("destination was not reached");
-        }
-    }
-).catch(
-    err => {
-        console.log("err at destination: " + err.toString());
-    }
-);
-
-// multiple destinations
-// notice that the destination that was not reached is left out.
-net.httpChecks(["http://www.google.com","http://yahoo.com:80","http://www.google.com:8000"]).then(
-    destinations => {
-        if (destinations.length > 0) {
-            console.log("success at destinations: " + destinations);
-        } else {
-            console.log("no destinations were reached");
-        }
-    }
-).catch(
-    err => {
-        console.log("err at destinations: " + err.toString());
-    }
-);
-```
-
-### localnodes example
-
-```js
-const net = require("../net.js");
-const util = require('util');
-
-// localNodes provides a list of all local network
-// nodes. If the network has more than one outgoing
-// NAT then localNodes will only provide the local
-// nodes in the immediate 'innermost' client network.
-//
-// At the moment, represents the same values that are stored in
-// the clients arp table.
-net.localNodes().then(
-    lNodes => {
-        console.log(util.inspect(lNodes, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("local nodes err: " + err.toString());
-    }
-);
-```
-
-### networkinfo example
-
-```js
-const net = require("../net.js");
-const util = require('util');
-
-net.networkInfo().then(
-    nInfo => {
-        console.log(util.inspect(nInfo, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("err network info: " + err.toString());
-    }
-);
-```
-
-### ping/pings example
-
-```js
-const net = require("../net.js");
-const util = require('util');
-
-net.ping("www.google.com").then(pingResults => {
-    console.log(util.inspect(pingResults, false, null, true));
-}).catch(error => {
-    console.log("ping error: " + error.toString());
+    // with the ip address in, hand do an ip geo lookup
+    net.hostGeoLookup(myHost, (myHost) => {
+       console.log("myHost with geo info: ");
+       console.log(util.inspect(myHost, false, null, true));
+    });
 });
 
-let pingsOptions = {
-    address: 'www.google.com',
-    numPings: 3,
-};
+// if you have an ip and want to find the host name
+// do a host name lookup. Can also work with private
+// ips if the local network has dns servers and
+// the private host has a dns host name.
+let h = net.newHost();
+h.ip = "8.22.12.170"; // probably need to update the example with an ip that has a host name.
+h.is_public = true;
 
-net.pings(pingsOptions).then(pingResults => {
-    console.log(util.inspect(pingResults, false, null, true));
-}).catch(error => {
-    console.log("ping error: " + error.toString());
+net.hostNameLookup(h, (hst) => {
+    console.log("host name lookup:");
+    console.log(util.inspect(hst, false, null, true));
+});
+
+// if you have a host interface mac address then perform
+// a vendor string lookup (note: rate limited to 1 per second)
+let macHost = net.newHost();
+macHost.mac = '8c:85:90:cd:ba:0e';
+
+// note: the 'macHost' in the callback is a reference
+// to the same object.
+net.hostVendorLookup(macHost, (macHost) => {
+   console.log("mac address vendor lookup: ");
+   console.log(util.inspect(macHost, false, null, true));
+});
+
+```
+
+### localnetwork example
+
+```js
+const net = require("../net.js");
+const util = require('util');
+
+// generate all localnetwork objects including
+// and especially the core local network hosts.
+net.localNetwork((hsts) => {
+    for (let i = 0; i < hsts.length; i++) {
+        console.log(util.inspect(hsts[i], false, null, true));
+    }
 });
 ```
 
-### reversedns example
+### ping example
 
 ```js
 const net = require("../net.js");
 const util = require('util');
 
-// reverseDns on google's dns server
-net.reverseDns("8.8.8.8").then(
-    hostNames => {
-        // 'google-public-dns-a.google.com'
-        console.log(util.inspect(hostNames, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("err reverseDns: " + err.toString());
-    }
-);
+// do a bunch of pings
+let cfg = net.newPingsCfg();
+cfg.target = "www.google.com";
+cfg.num_pings = 10;
+net.pings(cfg, (result) => {
+    console.log('do a bunch of pings and get stats');
+    console.log(util.inspect(result, false, null, true));
+    console.log('');
+});
 
-// if no value provided then the promise is still resolved
-// with hostNames === [].
-net.reverseDns("").then(
-    hostNames => {
-        // []
-        console.log(util.inspect(hostNames, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("err reverseDns: " + err.toString());
-    }
-);
+net.ping("www.google.com", (result) => {
+    console.log('do a single ping');
+    console.log(util.inspect(result, false, null, true));
+    console.log('');
+});
 
-// if no hostNames are found then the value of hostNames is 'undefined'.
-net.reverseDns("127.0.0.1").then(
-    hostNames => {
-        // []
-        console.log(util.inspect(hostNames, false, null, true));
+// url accessibility/liveness check
+net.pingUrl("www.google.com/", (pErr, url) => {
+    console.log("err since the url is not complete - poorly formed");
+    if (pErr) {
+        console.log(util.inspect(pErr.toString(), false, null, true));
     }
-).catch(
-    err => {
-        console.log("err reverseDns: " + err.toString());
+    console.log(util.inspect(url, false, null, true));
+    console.log('');
+});
+
+// urls accessibility/liveness check
+// an unreachable url wil simply return an empty string value
+// in the returned 'urls' array. The order matches the original
+// input urls order so the user can know which urls are unreachable.
+net.pingUrls(["https://www.google.com/", "https://www.bad.com:8080"], (pErr, urls) => {
+    console.log('check accessibility of a series of urls');
+    if (pErr) {
+        console.log(util.inspect(pErr.toString(), false, null, true));
     }
-);
+    console.log(util.inspect(urls, false, null, true));
+    console.log('');
+});
+
+// how a bad url comes back
+net.pingUrls(["https://www.google.com/", "www.bad.com"], (pErr, urls) => {
+    console.log('poorly formed url will come back as empty when presented with a group of urls');
+    // improperly formed url will result in err.
+    if (pErr) {
+        console.log(util.inspect(pErr.toString(), false, null, true));
+    }
+    console.log(util.inspect(urls, false, null, true));
+    console.log('');
+});
 ```
 
 ### speedtest example
@@ -261,7 +201,7 @@ const net = require("../net.js");
 const util = require('util');
 
 // speed test options
-let stOptions = {
+let stCfg = {
     progressCb: progress => {
         console.log("progress... " + util.inspect(progress, false, null, true));
     },
@@ -272,7 +212,7 @@ let stOptions = {
 // for other speed test libraries as well as adding more options
 // and normalizing the results to be independent of the underlying
 // test driver.
-net.speedTest(stOptions).then(
+net.speed(stCfg).then(
     stResult => {
         console.log(util.inspect(stResult, false, null, true));
     }
@@ -289,49 +229,14 @@ net.speedTest(stOptions).then(
 const net = require("../net.js");
 const util = require('util');
 
-// can provide dns host name
-net.traceroute("www.google.com").then(
-    trInfo => {
-        console.log(util.inspect(trInfo, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("err traceroute: " + err.toString());
-    }
-);
+// traceroute
+let destination = net.newHost();
+destination.name = "www.google.com";
 
-// can provide ip host name
-net.traceroute("8.8.8.8").then(
-    trInfo => {
-        console.log(util.inspect(trInfo, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("err traceroute: " + err.toString());
-    }
-);
+net.traceroute(destination, (err, hops) => {
+    console.log(util.inspect(hops, false, null, true));
+});
 
-// err if nothing is provided
-net.traceroute("").then(
-    trInfo => {
-        console.log(util.inspect(trInfo, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("err traceroute: " + err.toString());
-    }
-);
-
-// err if not a valid destination
-net.traceroute("blah.blah.blah").then(
-    trInfo => {
-        console.log(util.inspect(trInfo, false, null, true));
-    }
-).catch(
-    err => {
-        console.log("err traceroute: " + err.toString());
-    }
-);
 ```
 
 ## Special Thanks

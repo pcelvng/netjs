@@ -2,7 +2,7 @@ const net = require("../net.js");
 const util = require('util');
 
 // speed test options
-let stOptions = {
+let stCfg = {
     progressCb: progress => {
         console.log("progress... " + util.inspect(progress, false, null, true));
     },
@@ -13,7 +13,7 @@ let stOptions = {
 // for other speed test libraries as well as adding more options
 // and normalizing the results to be independent of the underlying
 // test driver.
-net.speedTest(stOptions).then(
+net.speed(stCfg).then(
     stResult => {
         console.log(util.inspect(stResult, false, null, true));
     }
