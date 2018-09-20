@@ -1,7 +1,7 @@
 {
   "name": "@pcelvng/net",
-  "version": "0.5.0",
-  "description": "simple network diagnostic tools.",
+  "version": "0.6.0",
+  "description": "simple network diagnostic tool chest.",
   "homepage": "https://github.com/pcelvng/netjs",
   "repository": "github:pcelvng/netjs.git",
   "main": "net.js",

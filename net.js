@@ -4,14 +4,537 @@ const os = require("os");
 const ip = require('ip');
 const iplocation = require('iplocation');
 const localdevices =  require('local-devices');
-const ping = require ("net-ping");
+const netping = require ("net-ping");
 const network = require('network');
 const arp = require('node-arp');
 const publicIp = require('public-ip');
 const speedtestNet = require('speedtest-net');
 const request = require('request');
 
-// doPings is a utility to do any number of pings.
+// newHost is an initializer for a host.
+function newHost() {
+    // return Object.create(hostNode);
+    // return host;
+
+    // host represents a host/interface on a
+    // network.
+    //
+    // possible utility methods:
+    // vendorLookup() - perform a vendor lookup (makes an http call)
+    // isPublic() - logic check to discover if ip is public
+    // geoLookup() - populates geo object
+    // dnsLookup() - populates dns object
+    return {
+        name: '', // host name
+        ip: '',
+        mac: '',
+        vendor: '', // interface vendor registered with the mac address
+        interface_type: '', // wireless, ethernet - empty means unknown
+        is_public: false,
+
+        // a host can have one or more of the following roles:
+        // - "nat" (if the host is nated)
+        // - "gateway" (in this context 'gateway' is the gateway to the internet)
+        // - "public" (public host is the host with the first public ip. public side of the internet 'gateway'
+        // - "router" (the host is a router)
+        // - "firewall" (currently not supported)
+        // - "dhcp" (currently not supported - indicates host is also a dhcp server)
+        // - "dns" (currently not supported - indicates the host is also a dns server)
+        // - "proxy" (currently not supported - indicates the host is providing proxy services)
+        // - "remote" (host that is not on the local network and does not belong to the local network)
+        // - "device" (connected network device)
+        // - "client" (client host - where diagnostic is being run)
+        //
+        // if roles is an empty array then roles have not been discovered or
+        // no roles are known which probably indicates the host is just another
+        // client on the network such as a connected phone or desktop or laptop.
+        roles: [], // "nat", "gateway", "router", "dns", "public", "remote"
+
+        // no dns entries returns an empty dns object
+        //
+        // if it's not empty then all the fields will be present
+        // even if empty.
+        // Note: currently not implemented.
+        //dns: {},
+
+        // geo only possibly available when the ip is public.
+        // no geo entries returns an empty geo object.
+        //
+        // if it's not empty then all the fields will be present
+        // even if those individual fields are empty.
+        geo: {},
+    };
+}
+
+function newHostGeo() {
+    return {
+        city: "", // city
+        state: "", // state/region code
+        country: "", // country code
+        zip: "", // zip/postal code
+        lat: 0.00, // registered lat
+        lon: 0.00, // registered lon
+        org: "" // org name of the local network public ip is the isp.
+    };
+}
+
+// hostNameLookup will do a reverse dns lookup of the provided
+// host object 'ip' property.
+// If there is an error then the hostname is simply
+// not populated.
+// The callback function 'cb' receives a single parameter
+// containing a host.
+//
+// Note that if host.name is already populated
+// then the lookup will be skipped.
+function hostNameLookup(hst, cb) { // returns promise
+    if (hst.name.length > 0 && hst.ip.length === 0) {
+        // in this case, only pick the first
+        // host name when more than one is present
+        // since it will just reside in the h.name field.
+        dns.reverse(hst.ip, (rErr, hNames) => {
+            // ignore error so that if the promise is called with Promise.all
+            // the rest will get a try.
+            // if no hNames are found then hNames is 'undefined' so
+            // normalize such as hNames is always an array even if it's empty.
+            if (Array.isArray(hNames) && hNames.length > 0) {
+                hst.name = hNames[0];
+            }
+            cb(hst);
+        });
+    } else {
+        cb(hst);
+    }
+}
+
+// hostGeoLookup will do a geo
+// lookup if:
+// - host geo object is empty
+// - ip is public
+// - ip is valid
+function hostGeoLookup(hst, cb) {
+    if (Object.keys(hst.geo).length > 0) {
+        cb(hst);
+    } else if (!hst.is_public) {
+        cb(hst); // geo lookup only available for public ips.
+    } else {
+        iplocation(hst.ip, (ipErr, geo) => {
+            if (ipErr) {
+                cb(hst);
+            } else {
+                hst.geo = newHostGeo();
+                hst.geo.city = geo.city;
+                hst.geo.state = geo.region_code;
+                hst.geo.country = geo.country;
+                hst.geo.zip = geo.postal;
+                hst.geo.lat = geo.latitude;
+                hst.geo.lon = geo.longitude;
+                hst.geo.org = geo.org;
+                cb(hst);
+            }
+        });
+    }
+}
+
+// hostVendorLookup will make an http
+// call to lookup the vendor associated
+// with the mac address.
+//
+// The lookup is only performed if:
+// - there is a mac address
+// - the vendor does not already have a value
+//
+// Please note that, at the moment the api calls are not
+// rate limited by the library which means that
+// a maximum of 1 request/second can be made before
+// getting rate limited by macvendors.com with a 429 response
+// code.
+// https://macvendors.com/api
+function hostVendorLookup(hst, cb) {
+    if (hst.mac.length > 0 && hst.vendor.length === 0) {
+        request('https://api.macvendors.com/' + hst.mac, (rErr, res, body) => {
+            if (rErr) {
+                cb(hst);
+            } else if (res) {
+                if (res.statusCode === 200) {
+                    hst.vendor = body;
+                    cb(hst);
+                } else {
+                    cb(hst);
+                }
+            }
+        });
+    } else {
+        cb(hst);
+    }
+}
+
+// hostIpLookup will do a dns lookup
+// to obtain the ip address for the provided
+// host name.
+//
+// if the host.name value is empty then
+// no lookup will be made.
+function hostIpLookup(hst, cb) {
+    if (hst.name.length > 0 && hst.ip.length === 0) {
+        dns.lookup(hst.name, (lErr, hostIp, family) => {
+            if (lErr) {
+                cb(hst);
+            } else {
+                hst.ip = hostIp;
+                hst.is_public = ip.isPublic(hst.ip);
+                cb(hst);
+            }
+        });
+    } else {
+        cb(hst);
+    }
+}
+
+// publicHost will provide the public internet host which is
+// the first host out on the internet with a
+// public ip. It is the 'public' side of the internet gateway host.
+// geo info lookup is included.
+//
+// cb = (hst) => {}
+// hst == public internet host which is a host object
+function publicHost(cb) {
+    let hst = newHost();
+
+    // not currently marked with 'gateway' or 'nat' roles.
+    // maybe consider changing the role designation and/or adding
+    // roles.
+    hst.roles = ['public'];
+
+    // get public ip first
+    publicIp.v4().then(pubip => {
+        hst.ip = pubip;
+        hst.is_public = true;
+
+        // reverse dns lookup to discover a host name
+        hostNameLookup(hst, (hst) => {
+            hostGeoLookup(hst, (hst) => {
+                cb(hst);
+            })
+        })
+
+        // geo lookup
+    }).catch(err => {
+        cb(hst);
+    });
+}
+
+// clientHost provides the client host information - current
+// active network interface.
+function clientHost(cb) {
+    let hst = newHost();
+    hst.roles = ["client"];
+
+    network.get_active_interface((iErr, actInterface) => {
+        if (iErr) {
+            cb(hst);
+        } else {
+            hst.mac = actInterface.mac_address;
+            hst.interface_type = actInterface.type.toLowerCase();
+            hst.ip = actInterface.ip_address;
+            hst.is_public = ip.isPublic(hst.ip); // surprised if this is public, but check anyway
+
+            // add geo (unlikely but it doesn't hurt)
+            hostGeoLookup(hst, (hst) => {
+                // try vendor lookup
+                // Note: if a lot of other things are going
+                // on then could be rate limited.
+                hostVendorLookup(hst, (hst) => {
+                    // if there are local network dns
+                    // the client could have a host name
+                    // so give it a shot.
+                    hostNameLookup(hst, (hst) => {
+                        cb(hst); // done!
+                    })
+                })
+            })
+        }
+    })
+}
+
+// client contains information about the client host
+// as well as general information about the client machine.
+function client(cb) {
+    clientHost((hst) => {
+        cb({
+            host: hst,
+            os_user: os.userInfo().username,
+            os_hostname: os.hostname(),
+            os_platform: os.platform(),
+        });
+    });
+}
+
+// nats will provide the local network nats on
+// the outbound path to the internet. The nat
+// with the role 'gateway' is the internet gateway.
+function nats(cb) {
+    let h = newHost();
+    h.ip = '8.8.8.8'; // google dns
+
+    traceroute(h, (trErr, hops) => {
+        let nts = []; // nat nodes
+
+        // iterate through the path until a public ip is found.
+        // the private ips up until the first public ip are
+        // nats.
+        for (let i = 0; i < hops.length; i++) {
+            if (hops[i].is_public) {
+                break;
+            } else {
+                let n = newHost(); // nat host
+
+                // the inner nat will have the role of 'NAT' and 'Router'. The outermost
+                // nat will have the 'NAT', 'Router' and 'Gateway' roles. The 'gateway'
+                // in this case is being defined as the 'Gateway to the internet'.
+                // in the weird case that there is one or more NATs in-between
+                // the inner and internet gateway, the 'Router' and 'NAT' roles are assigned.
+                //
+                // all nats have the 'NAT' and 'Router' roles.
+                hops[i].roles = ["nat", "router"];
+
+                // delete extra hop fields
+                delete hops[i].latency;
+                delete hops[i].ttl;
+                delete hops[i].err_msg;
+                nts.push(hops[i]);
+            }
+        }
+
+        // misc modifications
+        if (nts.length > 0) {
+            // update the outermost node by adding the
+            // 'gateway' role.
+            nts[nts.length - 1].roles.push("gateway");
+
+            // attempt to find and record the MAC address of the innermost
+            // NAT. Don't even try to find the MAC addresses of the other NATs
+            // b/c there is not going to be access and even if somehow there were
+            // access there could still be address collisions. Maybe there is another
+            // trick to at least obtain the mac address of the internet gateway but
+            // I don't know it.
+            arp.getMAC(nts[0].ip, (macErr, mac) => {
+                // just get what's possible. macErr is not
+                // taken into consideration. If the mac is provided
+                // then it is assigned.
+                if (typeof mac === 'string') {
+                    nts[0].mac = mac;
+                }
+
+                // attempt to get the vendor name
+                // it may not show up if too many other vendor calls are
+                // being made at the same time. The rate limit is 1 per second.
+                hostVendorLookup(nts[0], (hst) => {
+                    // attempt a host name lookup in the case of
+                    // a local network dns.
+                    hostNameLookup(hst, (hst) => {
+                        // reassignment not necessary
+                        // since the same object is operated on.
+                        cb(nts);
+                    });
+                });
+            });
+        } else {
+            cb(nts);
+        }
+    });
+}
+
+// coreLocalNetwork obtains the core players
+// in the client local network.
+//
+// An attempt is made to locate the following
+// host types:
+// - internet host (interface associated with the public ip)
+// - internet gateway (nat on the private side of the internet gateway)
+// - other nats (the network may have more than one nat besides the
+//   internet gateway)
+// - client host (the host info of the client)
+//
+// to be supported in the future:
+// - other nats and routers that are not just
+//   located on the out-bound internet path.
+// - other routers
+// - client dns hosts (dns hosts the client is currently using)
+//
+// cb = (hsts) => {}
+// callback function simply returns an array of hosts.
+function coreLocalNetwork(cb) {
+    let hsts = [];
+
+    // obtain public internet host - the public face of the local
+    // network.
+    publicHost((hst) => {
+        hsts.push(hst);
+
+        // client host
+        clientHost((hst) => {
+            hsts.push(hst);
+
+            // nats/gateways
+            nats((nts) => {
+                hsts.push(...nts);
+                cb(hsts);
+            });
+        })
+    });
+}
+
+function localNetwork(cb) {
+    coreLocalNetwork((hsts) => {
+        let coreCnt = hsts.length;
+
+        // add remaining misc nodes
+        localdevices().then(
+            devices => {
+                // translate 'devices' format to 'host' format
+                // and push to local host list.
+                for (let i = 0; i < devices.length; i++) {
+                    let h = newHost();
+                    let d = devices[i];
+                    if (d.name !== "?") {
+                        h.name = d.name;
+                    }
+                    h.ip = d.ip;
+                    h.mac = d.mac;
+                    h.roles = ["device"];
+
+                    // check that device host doesn't already exist
+                    // on the core network.
+                    // If it does exist check if the host name is available
+                    // and add it.
+                    let isCore = false;
+                    for (let j = 0; j < coreCnt; j++) {
+                        // check that the mac addresses are also the same
+                        // to rule out and 'outer' nat that doesn't have
+                        // a mac address but does have the same private ip
+                        // as a host on the 'inner' network.
+                        if (hsts[j].ip === h.ip && hsts[j].mac.length > 0) {
+                            isCore = true;
+
+                            if (hsts[j].name.length === 0 && h.name.length > 0) {
+                                hsts[j].name = h.name;
+                            }
+                        }
+                    }
+
+                    // only add device hosts if not already included in the
+                    // core local network.
+                    if (!isCore) {
+                        hsts.push(h);
+                    }
+
+                    // Note: not going to perform a vendor lookup since
+                    // vendor lookup is rate limited to 1 per second.
+                }
+
+                cb(hsts);
+            }
+        ).catch(
+            lErr => {
+                cb(hsts);
+            }
+        );
+    });
+}
+
+// traceroute provides low configuration traceroute functionality similar
+// to 'traceroute' cli. While it will lookup all host names
+// associated with the ip it will not find all the ips. In
+// this way the returned ips represent the actual ips reported back
+// by each server along the way.
+//
+// Note that traceroute is performed with 64 bit packet sizes.
+// For now the max number of hops is not configurable.
+//
+// Traceroute hosts have two additional object fields:
+// - latency (roundtrip latency from user client to that host)
+// - ttl
+// - err_msg (representing some kind of error on that hop)
+//
+// cb = (err, hops) => {}
+function traceroute(destHst, cb) {
+    let hops = []; // array of hosts with 'latency' and 'ttl' fields added.
+
+    // lookup destHst.ip
+    hostIpLookup(destHst, (destHst) => {
+        // initialize netping session
+        let session = netping.createSession({
+            // networkProtocol: netping.NetworkProtocol.IPv4,
+            packetSize: 64, // default: 16
+            retries: 1,
+            // sessionId: (process.pid % 65535),
+            // timeout: 2000,
+            // ttl: 128 // different than the maxHops ttl value.
+        });
+
+        session.on('error', (sErr) => {
+            cb(sErr, hops);
+        });
+
+        session.traceRoute(destHst.ip, 64, // maxHops = 64 // plenty
+            (error, target, ttl, sent, rcvd) => { // feed callback
+                // note: when error is not a TimeExeededError
+                // then its string value is the hop ip.
+                let hopHst = newHost();
+                hopHst.ip = target;
+
+                let errMsg = "";
+                if (error) {
+                    hopHst.ip = error.source; // most of the time it's a TimeExceededError
+
+                    if (!(error instanceof netping.TimeExceededError)) {
+                        errMsg = error.message;
+
+                        // in case the error.message is empty.
+                        if (errMsg === "") {
+                            errMsg = error.toString();
+                        }
+                    }
+                }
+
+                let isPublic = false;
+                let latency = rcvd - sent;
+
+                // make sure the 'error' is a valid ip.
+                if (ip.isV4Format(hopHst.ip)) {
+                    hopHst.is_public = ip.isPublic(hopHst.ip);
+                } else {
+                    hopHst.ip = "" // error value not an ip
+                }
+
+                // extra special host fields
+                hopHst.latency = latency;
+                hopHst.ttl = ttl;
+                hopHst.err_msg = errMsg;
+
+                hops.push(hopHst); // add hop host
+            },
+            (trErr, target) => { // done callback
+                if (trErr) {
+                    cb(null, hops);
+                } else {
+                    // TODO: consider adding geo
+                    // TODO: consider adding host name lookup
+                    cb(null, hops);
+                }
+            });
+    });
+}
+
+function newPingsCfg() {
+    return {
+        target: '', // ping target; can be ip or hostname
+        num_pings: 1,
+    };
+}
+
+// pings is a utility to do any number of pings.
 // module.exports.pings = doPings;
 // - make sure to leave the http:// or https:// off of the address. So, instead of 'https://www.google.com'
 //   do 'www.google.com'. If it's not in the correct format then the callback will provide an error.
@@ -20,358 +543,121 @@ const request = require('request');
 // - make sure not provide a port; ie instead of 'www.google.com:80' just do 'www.google.com'.
 // - can provide just an ip address; ie '172.217.4.164' is just fine. If that's the case then the results.host and
 //   results.ip will contain the same value.
-function doPings(options = {host: '', ip: '', numPings: 1}, pingerCallback) {
-    let pingResults = {
-        numPings: 1, // default is 1
-        packetSize: 64, // for now not an option.
-        host: options.host, // ping host
-        ip: options.ip, // ping ip
+//
+// cb = (result) => {}
+function pings(pingsCfg, cb) {
+    // create host to represent ping destination
+    let hst = newHost();
+    hst.roles = ['remote'];
 
-        // pings represents ping results. note that the number of pings
-        // may be less than the requested numPings.
-        pings: [], // array of {} with 'start' and 'return' keys whose values are Date objects.
+    // check if target is ip address or host name.
+    if (ip.isV4Format(pingsCfg.target)) {
+        hst.ip = pingsCfg.target;
+    } else {
+        hst.name = pingsCfg.target;
+    }
+
+    let result = {
+        packet_size: 64, // for now not an option.
+        ping_host: hst, // destination host
+        sent: 1, // num of pings sent; default is 1
+        returned: 0, // num of returned pings
+        loss: 0, // ping loss; sent - returned
+        min: 0, // min ping latency
+        max: 0, // max ping latency
+        avg: 0, // avg ping latency
+        jitter: 0, // jitter (std deviation) ping latency
+        pings: [], // array of numeric values representing millisecond ping latency
     };
 
     // numPings option
-    if (typeof options.numPings === 'number') {
+    if (typeof pingsCfg.num_pings === 'number') {
         // numPings must at least be 1 or greater.
-        if (options.numPings > 0) {
-            pingResults.numPings = options.numPings;
+        if (pingsCfg.num_pings > 0) {
+            result.sent = pingsCfg.num_pings;
         }
     }
 
-    // initialize ping session
-    let sessionOptions = {
-        // networkProtocol: ping.NetworkProtocol.IPv4,
-        packetSize: pingResults.packetSize, // default: 16
-        retries: 0, // if not 0 then there appears to be weird side effects
-        // sessionId: (process.pid % 65535),
-        // timeout: 2000,
-        // ttl: 128
-    };
-    let session = ping.createSession(sessionOptions);
+    // get the target host ip - if needed
+    // not going to bother with reverse lookup.
+    hostIpLookup(hst, (hst) => {
+        hst.is_public = ip.isPublic();
 
-    let cnt = 0;
-    let pa = () => {
-        session.pingHost(options.ip, (error, target, sent, rcvd) => {
-            if (error) {
-                pingerCallback(error, pingResults);
-            } else {
-                pingResults.pings.push({start: sent, return: rcvd});
-                cnt++;
-                if (cnt < options.numPings) {
-                    // do another ping until completed.
-                    pa();
-                } else {
-                    pingerCallback(null, pingResults);
-                }
-            }
-        })
-    };
+        // dest host geo lookup
+        hostGeoLookup(hst, (hst) => {
+            // initialize ping session
+            let session = netping.createSession({
+                // networkProtocol: ping.NetworkProtocol.IPv4,
+                packetSize: result.packetSize, // default: 16
+                retries: 0, // if not 0 then there appears to be weird side effects
+                // sessionId: (process.pid % 65535),
+                // timeout: 2000,
+                // ttl: 128
+            });
 
-    pa();
-}
+            let cnt = 0;
+            let pa = () => {
+                session.pingHost(hst.ip, (error, target, sent, rcvd) => {
+                    if (!error) {
+                        result.pings.push(rcvd - sent);
 
-// doPingsDns is just a simple wrapper on top of doPings
-// but will do a dns lookup on the address.
-function doPingsDns(options = {address: '', numPings: 1}, pingsCallback) {
-    // dns lookup wrapper
-    dns.lookup(options.address, (error, ip, family) => {
-        // results and doPing options are the same type of object.
-        let results = {
-            host: '',
-            ip: '',
-            numPings: options.numPings,
-            packetSize: options.packetSize,
-        };
+                        // stats
+                        result.returned = result.pings.length;
+                        result.loss = result.sent - result.returned;
+                        result.min = Math.min(...result.pings);
+                        result.max = Math.max(...result.pings);
+                        result.avg = (
+                            () => {
+                                let sum = 0.0;
+                                for (let i = 0; i < result.pings.length; i++) {
+                                    sum += result.pings[i];
+                                }
 
-        if (typeof options.address === 'string') {
-            results.host = options.address;
-        }
+                                return sum/result.pings.length;
+                            }
+                        )();
 
-        if (typeof ip === 'string') {
-            results.ip = ip;
-        }
+                        // jitter is just a sample standard deviation
+                        // note: if there is just one ping then jitter is NaN.
+                        result.jitter = (
+                            () => {
+                                let sumSq = 0.0; // diff around the mean squared and summed.
+                                for (let i = 0; i < result.pings.length; i++) {
+                                    sumSq += Math.pow(result.pings[i] - result.avg, 2);
+                                }
 
-        if (results.ip === '') {
-            results.ip = results.host;
-        }
+                                return Math.sqrt(sumSq /(result.pings.length-1)) // n = sample size - 1
+                            }
+                        )();
+                    }
 
-        if (error) {
-            pingsCallback(error, results);
-        } else {
-            doPings(results, pingsCallback);
-        }
+                    // recurse pings until complete
+                    cnt++;
+                    if (cnt < result.sent) { // sent is the total intended to send.
+                        pa();
+                    } else {
+                        cb(result);
+                    }
+                })
+            };
+
+            pa();
+        });
     });
 }
 
-function pingsPromise(pingsOptions = {}) {
-    let pingerOptions = {
-        address: "",
-        numPings: 1,
-    };
+// ping is simple wrapper around pings. It just
+// does one ping.
+function ping(target, cb) {
+    let cfg = newPingsCfg();
+    cfg.target = target;
+    cfg.num_pings = 1;
 
-    if (typeof pingsOptions.address === "string") {
-        pingerOptions.address = pingsOptions.address;
-    }
-
-    if (typeof pingsOptions.numPings === "number") {
-        if (pingsOptions.numPings > 0) {
-            pingerOptions.numPings = pingsOptions.numPings;
-        }
-    }
-
-    return new Promise(
-        (resolve, reject) => {
-            doPingsDns(pingerOptions, (error, results) => {
-                if (error) {
-                    reject(error);
-                } else {
-                    resolve(results);
-                }
-            })
-        }
-    );
+    pings(cfg, cb);
 }
 
-// pingPromise is a simple wrapper around doPingsDns for doing just
-// one ping. Ping is simpler and preferred if the user
-// just wants to do a single ping.
-function pingPromise(pingAddress) {
-    let pingerOptions = {
-        address: pingAddress,
-    };
-
-    return new Promise(
-        (resolve, reject) => {
-            doPingsDns(pingerOptions, (error, results) => {
-                if (error) {
-                    reject(error);
-                } else {
-                    resolve(results);
-                }
-            })
-        }
-    );
-}
-
-// clientInfo contains some basic client network
-// information such as the internal ip, public ip,
-// and mac address of the internal ip. It may
-// get expanded to include more information in the
-// future.
-function clientInfo() {
-    let cInfo = {
-        mac: "",
-        ip: "",
-        interfaceType: "", // wired, wireless
-        osUser: os.userInfo().username,
-        osHostname: os.hostname(),
-        osPlatform: os.platform(),
-        osPlatformVersion: os.release(),
-    };
-
-    return new Promise(
-        (resolve, reject) => {
-            network.get_active_interface((err, actInterface) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    cInfo.mac = actInterface.mac_address;
-                    cInfo.interfaceType = actInterface.type.toLowerCase();
-                    cInfo.ip = actInterface.ip_address;
-
-                    resolve(cInfo);
-                }
-            })
-        }
-    );
-}
-
-// defaultGateway will return the client gateway ip
-// and mac address. If there is a problem
-// then will return as much information
-// as it's able to obtain. Therefore
-// there is no error but rather the
-// promise is resolved with as much information
-// as it can get.
-//
-// If the network has more than one NAT then the
-// client gateway will be different than the
-// internet gateway.
-function defaultGateway() {
-    // gwInfo is in the same format
-    // as a node object returned from the
-    // localNodes function.
-    let gwInfo = {
-        hostName: "", // not implemented yet - but put here to be compatible with other node objects.
-        ip: "",
-        mac: "",
-        roles: ["NAT", "Router"]
-    };
-
-    return new Promise(
-        (resolve, reject) => {
-            network.get_gateway_ip((gwErr, gwIp) => {
-                if (gwErr) {
-                    // if there is a problem, it's
-                    // resolved with as much
-                    // info as we could obtain.
-                    // console.log("gwErr: " + gwErr.toString());
-                    // resolve(gwInfo);
-                    reject(gwErr);
-                } else {
-                    gwInfo.ip = gwIp;
-                    arp.getMAC(gwIp, (macErr, mac) => {
-                        if (macErr) {
-                            // only able to get the ip. That's ok,
-                            // just get what's possible.
-                            // reject(macErr);
-                            resolve(gwInfo);
-                        } else {
-                            gwInfo.mac = mac;
-                            resolve(gwInfo);
-                        }
-                    })
-                }
-            })
-        }
-    );
-}
-
-// clientGateway is a convenience function for obtaining the
-// internet gateway by calling the 'nats' function and grabbing
-// the 'innermost' nat node. If the network has only one NAT then
-// the client gateway will also have the 'Gateway' role indicating
-// that it is also the gateway to the internet.
-function clientGateway() {
-    return new Promise(
-        (resolve, reject) => {
-            nats().then(
-                allNats => {
-                    if (allNats.length > 0) {
-                        resolve(allNats[0]); // always get the first
-                    }
-                }
-            ).catch(
-                nErr => {
-                    reject(nErr);
-                }
-            );
-        }
-    );
-}
-
-// networkInfo provides basic network information:
-// - gateway (ip, mac)
-//      - If there are multiple gateways then the default is provided.
-// - public ip
-// - public ip basic geo
-//      - city
-//      - state (region)
-//      - country
-//      - zip
-// - isp
-//
-// also provides:
-// - start at (when the scan started)
-// - end at (when the scan completed)
-// - open outgoing ports (maybe)
-function networkInfo() {
-    let netInfo = {
-        publicIp: "",
-
-        // basic geo
-        city: "",
-        state: "",
-        country: "",
-        zip: "",
-
-        // ISP
-        isp: "",
-
-        // TODO: maybe add dns info, but maybe implemented in networkNodes
-        // local dns
-        // localDnsIp: "",
-        // localDnsMac: "",
-
-        // internet gateway info
-        // if the internal network has
-        // more than one NAT then this gateway
-        // is the 'outermost' gateway or the gateway
-        // that leads to the internet.
-        //
-        // If there is more than one NAT then, at
-        // the moment this library is unable to obtain
-        // the mac address of the internet gateway.
-        gatewayIp: "",
-        gatewayMac: "", // provided if obtainable.
-
-        startAt: new Date(),
-        doneAt: new Date(), // the done date is updated when complete
-
-        // array of node objects.
-        // nodeObj = {
-        //  host: "", // assigned local dns host name, if available
-        //  ip: "",
-        //  mac: "",
-        //  interface: "", // wireless, ethernet
-        //  roles: [], // list of devices roles (NAT, Router, Gateway)
-        // }
-        // localNodes:[], // list of local devices/network nodes. array of node objects.
-    };
-
-    let getGeoInfo = new Promise(
-        (resolve, reject) => {
-            // get public ip first
-            publicIp.v4().then(pubIp => {
-                netInfo.publicIp = pubIp;
-
-                // geo info
-                iplocation(pubIp).then(
-                    geo => {
-                        netInfo.city = geo.city;
-                        netInfo.state = geo.region_code;
-                        netInfo.country = geo.country;
-                        netInfo.zip = geo.postal;
-                        netInfo.isp = geo.org;
-
-                        resolve(netInfo);
-                    }
-                ).catch(
-                    err => {
-                        // still resolve with the info
-                        // we have - public ip
-                        resolve(netInfo);
-                    }
-                )
-            }).catch(err => {
-                reject(err);
-            });
-        }
-    );
-
-    return new Promise(
-        (resolve, reject) => {
-            Promise.all([getGeoInfo, internetGateway()]).then(
-                ([gInfo, gwInfo]) => {
-                    netInfo.gatewayIp = gwInfo.ip;
-                    netInfo.gatewayMac = gwInfo.mac;
-
-                    netInfo.doneAt = new Date();
-                    resolve(netInfo);
-                }
-            ).catch(
-                err => {
-                    reject(err);
-                }
-            );
-        }
-    );
-}
-
-// httpCheck returns a promise for checking a single
-// http(s) endpoint.
+// pingUrl checks a single
+// http(s) endpoint for a 200 response.
 //
 // Notes:
 // - only supports the GET action method at the moment.
@@ -385,344 +671,54 @@ function networkInfo() {
 // should be a complete url such as
 // "http://www.google.com/path?var1=value1"
 // "https://www.google.com/path"
-function httpCheck(destination) {
-    return new Promise(
-        (resolve) => {
-            let reqOptions = {
-                url: destination,
-                method: "GET",
-                timeout: 2000, // wait max 2 seconds. Note: os can override this value.
-            };
-            request(reqOptions).on('response', (response) => {
-                if (response.statusCode === 200) {
-                    // on success just sends back the checked destination
-                    resolve(destination);
-                } else {
-                    resolve("");
-                }
-            }).on('error', (err) => {
-                // just resolve with an empty string.
-                resolve("");
-            })
+// cb = (err, url) => {}
+function pingUrl(url, cb) {
+    request(url, (rErr, res, body) => {
+        if (rErr) {
+            cb(rErr, '');
+            return
         }
-    );
+
+        if (res && res.statusCode === 200) {
+            cb(null, url);
+        } else {
+            cb(null, '');
+        }
+    });
 }
 
-// httpChecks is like httpCheck for an array of destinations.
+// pingUrls is like pingUrl for an array of destinations.
 // destinations = array of http(s) destination strings.
-function httpChecks(destinations) {
-    return new Promise(
-        (resolve) => {
-            let promises = []; // array of promises
-            for (let i = 0; i < destinations.length; i++) {
-                promises.push(httpCheck(destinations[i]));
-            }
-
-            Promise.all(promises).then(
-                (okDestinations) => {
-                    // only return the non-empty destinations
-                    let finalDestinations = [];
-                    for (let i = 0; i < okDestinations.length; i++) {
-                        if (okDestinations[i].length > 0 ) {
-                            finalDestinations.push(okDestinations[i]);
-                        }
-                    }
-
-                    resolve(finalDestinations);
-                }
-            )
-        }
-    )
-}
-
-// traceroute provides traceroute functionality similar
-// to 'traceroute' cli. While it will lookup all host names
-// associated with the ip it will not find all the ips. In
-// this way the returned ips represent the actual ips reported back
-// by each server along the way.
-function traceroute(host = "", hostIp = "") {
-    let trInfo = {
-        targetHost: host,
-        targetIp: hostIp,
-        packetSize: 64,
-        hops: [],
-    };
-
-    // initialize ping session
-    let sessionOptions = {
-        // networkProtocol: ping.NetworkProtocol.IPv4,
-        packetSize: trInfo.packetSize, // default: 16
-        retries: 1,
-        // sessionId: (process.pid % 65535),
-        // timeout: 2000,
-        // ttl: 128 // different than the maxHops ttl value.
-    };
-
-    let maxHops = 64; // should be plenty
-    let session = ping.createSession(sessionOptions);
-
-    return new Promise(
-        (resolve, reject) => {
-            session.traceRoute(hostIp, maxHops,
-                (error, target, ttl, sent, rcvd) => { // feed callback
-                    // note: when error is not a TimeExeededError
-                    // then its string value is the hop ip.
-                    let hopIp = target; // target is just the default. if error exists then
-                    let errMsg = "";
-                    if (error) {
-                        hopIp = error.source;
-
-                        if (!(error instanceof ping.TimeExceededError)) {
-                            errMsg = error.message;
-
-                            // in case the error.message is empty.
-                            if (errMsg === "") {
-                                errMsg = error.toString();
-                            }
-                        }
-                    }
-
-                    let isPublic = false; // user should check that the hopIp is not empty as well.
-                    let ms = rcvd - sent;
-
-                    // make sure the 'error' is a valid ip.
-                    if (ip.isV4Format(hopIp) === false) {
-                        hopIp = "" // error value not an ip
-                    } else {
-                        isPublic = ip.isPublic(hopIp);
-                    }
-
-                    let hop = {
-                        hostNames: [], // TODO: reverse dns lookup of ip to get host
-                        ip: hopIp,
-                        isPublic: isPublic, // if the ip is public or private
-                        ttl: ttl,
-                        ms: ms, // ms roundtrip latency
-                        errMsg: errMsg,
-                    };
-
-                    trInfo.hops.push(hop); // add hop
-                },
-                (error, target) => { // done callback
-                    if (error) {
-                        reject(error);
-                    } else {
-                        // reverse dns lookup for all public ip hops
-                        // in practice looking up all hops but ignoring
-                        // errors.
-                        let promises = []; // array of promises for reverse dns lookups.
-                        for (let i = 0; i < trInfo.hops.length; i++) {
-                            promises.push(reverseDns(trInfo.hops[i].ip));
-                        }
-
-                        Promise.all(promises).then(
-                            allHostNames => {
-                                // map all resolved hostNames back to each hop.
-                                // no resolved hostNames means the value is 'undefined'.
-                                for (let i = 0; i < trInfo.hops.length; i++) {
-                                    if (!(typeof allHostNames[i] === 'undefined')) {
-                                        trInfo.hops[i].hostNames = allHostNames[i];
-                                    }
-                                }
-                                resolve(trInfo);
-                            }
-                        ).catch(
-                            reverseDnsErr => {
-                                reject(reverseDnsErr);
-                            }
-                        );
-                    }
-                });
-        }
-    );
-}
-
-// reverseDns will return all the host names associated with a provided
-// ip address. If no ipAddress is provided then the promise is still not rejected
-// but rather resolved with no hostNames - empty array ([]). This way it's easier
-// and more friendly to perform a lot of lookups at one time without borking
-// the chain of promises.
-function reverseDns(ipAddress = "") { // returns promise
-    return new Promise(
-        (resolve) => {
-            if (ipAddress.length === 0) {
-                resolve([]);
-            } else {
-                dns.reverse(ipAddress, (revErr, hostNames) => {
-                    // ignore error so that if the promise is called with Promise.all
-                    // the rest will get a try.
-                    // if no hostNames are found then hostNames is 'undefined' so
-                    // normalize such as hostNames is always an array even if it's empty.
-                    if (typeof hostNames === 'undefined') {
-                        hostNames = [];
-                    }
-                    resolve(hostNames);
+// cb = (err, urls) => {}
+function pingUrls(urls, cb) {
+    let p = (url) => {
+        return new Promise(
+            (resolve, reject) => {
+                pingUrl(url, (err, url) => {
+                    // TODO: consider passing on err
+                    resolve(url);
                 });
             }
+        );
+    };
+
+    let promises = []; // pingUrl promises
+    for (let i = 0; i < urls.length; i++) {
+        promises.push(p(urls[i]));
+    }
+
+    Promise.all(promises).then(
+        urls => {
+            cb(null, urls);
+        }
+    ).catch(
+        pErr => {
+            cb(pErr, []);
         }
     );
 }
 
-// tracerouteDns provides a simple dns lookup before passing on the
-// host and ip to traceroute.
-function tracerouteDns(host = "") {
-    // dns lookup wrapper
-    return new Promise(
-        (resolve, reject) => {
-            dns.lookup(host, (dnsError, hostIp, family) => {
-                if (dnsError) {
-                    reject(dnsError);
-                } else {
-                    traceroute(host, hostIp).then(
-                        trInfo => {
-                            resolve(trInfo);
-                        }
-                    ).catch(
-                        trError => {
-                            reject(trError);
-                        }
-                    );
-                }
-            });
-        }
-    );
-}
-
-// nats will attempt to find and return all the local network nates for the client
-// default gateway. If more than one nat is returned then that exit path is double nated.
-// The returned nat(s) are the same node objects as is provided from 'localNodes'.
-//
-// The nats are found by performing a traceroute and reporting the first x private
-// node hops. If the network is stacked with more than one nat then it is unlikely
-// that anything but the 'inner' nat mac address will be discoverable.
-function nats() {
-    return new Promise(
-        (resolve, reject) => {
-            tracerouteDns("www.google.com").then(
-                trInfo => {
-                    let nNodes = []; // nat nodes
-
-                    // iterate through the path until a public ip is found.
-                    // the private ips up until the first public ip are
-                    // nats.
-                    for (let i = 0; i < trInfo.hops.length; i++) {
-                        if (trInfo.hops[i].isPublic) {
-                            break;
-                        } else {
-                            // just get the first hostname - if any are reported
-                            let hostName = "";
-                            if (trInfo.hops[i].hostNames.length > 0) {
-                                hostName = trInfo.hops[i].hostNames[0];
-                            }
-
-                            nNodes.push({
-                                hostName: hostName,
-                                ip: trInfo.hops[i].ip,
-                                mac: "", // will lookup for only the 'inner' or first nat.
-
-                                // the inner nat will have the role of 'NAT' and 'Router'. The outermost
-                                // nat will have the 'NAT', 'Router' and 'Gateway' roles. The 'gateway'
-                                // in this case is being defined as the 'Gateway to the internet'.
-                                // in the weird case that there is one or more NATs in-between
-                                // the inner and internet gateway, the 'Router' and 'NAT' roles are assigned.
-                                //
-                                // all nats have the 'NAT' and 'Router' roles.
-                                roles: ["NAT", "Router"], // string array of roles. (dns, router, gateway, unknown)
-                            });
-                        }
-                    }
-
-                    // misc modifications
-                    if (nNodes.length > 0) {
-                        // update the outermost node by adding the
-                        // 'Gateway' role.
-                        nNodes[nNodes.length - 1].roles.push("Gateway");
-
-                        // attempt to find and record the MAC address of the innermost
-                        // NAT. Don't even try to find the MAC addresses of the other NATs
-                        // b/c there is not going to be access and even if somehow there were
-                        // access there could still be address collisions. Maybe there is another
-                        // trick to at least obtain the mac address of the internet gateway but
-                        // I don't know it.
-                        arp.getMAC(nNodes[0].ip, (macErr, mac) => {
-                            // just get what's possible. macErr is not
-                            // taken into consideration. If the mac is provided
-                            // then it is assigned.
-                            if (typeof mac === 'string') {
-                                nNodes[0].mac = mac;
-                            }
-                            resolve(nNodes);
-                        });
-                    }
-                }
-            ).catch(
-                trErr => {
-                    reject(trErr);
-                }
-            )
-        }
-    );
-}
-
-// internetGateway is a convenience function for obtaining the
-// internet gateway by calling the 'nats' function and grabbing
-// the 'outermost' nat node. The outermost nat node should also
-// be tagged with the 'Gateway' role. 'Gateway' in this context
-// indicates it is an internet gateway and not just a gateway to
-// another private network.
-function internetGateway() {
-    return new Promise(
-        (resolve, reject) => {
-            nats().then(
-                allNats => {
-                    if (allNats.length > 0) {
-                        resolve(allNats[allNats.length - 1]);
-                    }
-                }
-            ).catch(
-                nErr => {
-                    reject(nErr);
-                }
-            );
-        }
-    );
-}
-
-// localNodes provides a full list of nodes on the local network
-// as well as trying to determine information about some of them
-// such as if the node is a gateway.
-//
-// Note that if the local network is double nated then the 'outer' local
-// network nodes are not returned, only the 'inner' nodes.
-function localNodes() {
-    return localdevices();
-    // let lNodes = {
-    //
-    // };
-    //
-    // let lNode = {
-    //     hostName: "",
-    //     ip: "",
-    //     mac: "",
-    //     roles: [], // string array of roles. (dns, router, gateway, unknown)
-    // };
-
-    // return new Promise(
-    //     (resolve, reject) => {
-    //         localdevices().then(
-    //             nodes => {
-    //                 resolve(nodes);
-    //             }
-    //         ).catch(
-    //             err => {
-    //                 reject(err);
-    //             }
-    //         );
-    //     }
-    // );
-}
-
-// speedTest performs an upload speed test to a specified
+// speed performs an upload speed test to a specified
 // destination endpoint.
 // look at: https://github.com/nesk/network.js
 // let stOptions = {
@@ -734,7 +730,7 @@ function localNodes() {
 //     of: 0, // total number of touch points.
 //     perComplete: 0.00, // approximate percent complete.
 // };
-function speedTest(stOptions) {
+function speed(stOptions) {
     return new Promise(
         (resolve, reject) => {
             let totalProgress = 8.0;
@@ -752,12 +748,60 @@ function speedTest(stOptions) {
                     msg: pMsg,
                     at: tp,
                     of: totalProgress,
-                    perComplete: perComplete,
+                    percent_complete: perComplete,
                 }
             };
 
             speedtestNet().on('data', stResult => {
-                resolve(stResult);
+                // convert to standard host object format
+                let result = {
+                    download_mbps: 0,
+                    upload_mbps: 0,
+                    download_size: 0, // in bytes
+                    upload_size: 0, // in bytes
+                    distance_mi: 0, // in miles
+                    ping_ms: 0,
+                    client_isp: '',
+                    server_sponsor: '', // speed test server sponsor name
+                    client: newHost(),
+                    server: newHost(),
+                };
+
+                // extract and translate results
+                result.download_mbps = stResult.speeds.download;
+                result.upload_mbps = stResult.speeds.upload;
+                result.download_size = stResult.speeds.originalDownload;
+                result.upload_size = stResult.speeds.originalUpload;
+                result.distance_mi = stResult.server.distanceMi;
+                result.ping_ms = stResult.server.ping;
+                result.client_isp = stResult.client.isp;
+                result.server_sponsor = stResult.server.sponsor;
+                // client
+                result.client.ip = stResult.client.ip;
+                result.client.is_public = ip.isPublic(result.client.ip); // can't imagine it wouldn't be public
+                result.client.roles = ['public'];
+
+                // server
+                result.server.name = stResult.server.host;
+                result.server.roles = ['remote'];
+
+                // client host name lookup
+                hostNameLookup(result.client, (cHst) => {
+                    // client geo lookup
+                    hostGeoLookup(result.client, (cHst) => {
+                        if (result.client.geo.org !== '') {
+                            result.client_isp = result.client.geo.org;
+                        }
+
+                        // server ip lookup
+                        hostIpLookup(result.server, (sHst) => {
+                            // server geo lookup
+                            hostGeoLookup(result.server, (sHst) => {
+                                resolve(result);
+                            })
+                        });
+                    });
+                });
             }).on('error', stErr => {
                 reject(stErr);
             }).on('config', ()=> {
@@ -779,21 +823,21 @@ function speedTest(stOptions) {
     );
 }
 
-module.exports.ping = pingPromise;
-module.exports.pings = pingsPromise;
-module.exports.clientInfo = clientInfo;
-module.exports.clientGateway = clientGateway; // client gateway
-module.exports.defaultGateway = defaultGateway; // default gateway
-module.exports.internetGateway = internetGateway; // internet gateway
-module.exports.gateways = nats; // all gateways on the way out to the internet.
-module.exports.networkInfo = networkInfo;
-module.exports.localNodes = localNodes;
-module.exports.speedTest = speedTest;
-module.exports.traceroute = tracerouteDns;
-module.exports.reverseDns = reverseDns;
-module.exports.httpCheck = httpCheck;
-module.exports.httpChecks = httpChecks;
-
-// TODO: add dns node support. Find the local network dns host.
-// const netAddress = require('address');
-// module.exports.dns = netAddress.dns;
+module.exports.newHost = newHost;
+module.exports.hostNameLookup = hostNameLookup;
+module.exports.hostIpLookup = hostIpLookup;
+module.exports.hostGeoLookup = hostGeoLookup;
+module.exports.hostVendorLookup = hostVendorLookup;
+module.exports.traceroute = traceroute;
+module.exports.publicHost = publicHost;
+module.exports.clientHost = clientHost;
+module.exports.client = client;
+module.exports.nats = nats;
+module.exports.coreLocalNetwork = coreLocalNetwork;
+module.exports.localNetwork = localNetwork;
+module.exports.newPingsCfg = newPingsCfg;
+module.exports.pings = pings;
+module.exports.ping = ping;
+module.exports.pingUrl = pingUrl;
+module.exports.pingUrls = pingUrls;
+module.exports.speed = speed;
