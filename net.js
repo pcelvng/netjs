@@ -11,71 +11,57 @@ const publicIp = require('public-ip');
 const speedtestNet = require('speedtest-net');
 const request = require('request');
 
-// newHost is an initializer for a host.
-function newHost() {
-    // return Object.create(hostNode);
-    // return host;
+// Host constructor
+function Host() {
+    this.name = ''; // host name
+    this.ip = '';
+    this.mac = '';
+    this.vendor = ''; // interface vendor registered with the mac address
+    this.interface_type = ''; // wireless, ethernet - empty means unknown
+    this.is_public = false;
 
-    // host represents a host/interface on a
-    // network.
+    // a host can have one or more of the following roles:
+    // - "nat" (if the host is nated)
+    // - "gateway" (in this context 'gateway' is the gateway to the internet)
+    // - "public" (public host is the host with the first public ip. public side of the internet 'gateway'
+    // - "router" (the host is a router)
+    // - "firewall" (currently not supported)
+    // - "dhcp" (currently not supported - indicates host is also a dhcp server)
+    // - "dns" (currently not supported - indicates the host is also a dns server)
+    // - "proxy" (currently not supported - indicates the host is providing proxy services)
+    // - "remote" (host that is not on the local network and does not belong to the local network)
+    // - "device" (connected network device)
+    // - "client" (client host - where diagnostic is being run)
     //
-    // possible utility methods:
-    // vendorLookup() - perform a vendor lookup (makes an http call)
-    // isPublic() - logic check to discover if ip is public
-    // geoLookup() - populates geo object
-    // dnsLookup() - populates dns object
-    return {
-        name: '', // host name
-        ip: '',
-        mac: '',
-        vendor: '', // interface vendor registered with the mac address
-        interface_type: '', // wireless, ethernet - empty means unknown
-        is_public: false,
+    // if roles is an empty array then roles have not been discovered or
+    // no roles are known which probably indicates the host is just another
+    // client on the network such as a connected phone or desktop or laptop.
+    this.roles = []; // "nat", "gateway", "router", "dns", "public", "remote"
 
-        // a host can have one or more of the following roles:
-        // - "nat" (if the host is nated)
-        // - "gateway" (in this context 'gateway' is the gateway to the internet)
-        // - "public" (public host is the host with the first public ip. public side of the internet 'gateway'
-        // - "router" (the host is a router)
-        // - "firewall" (currently not supported)
-        // - "dhcp" (currently not supported - indicates host is also a dhcp server)
-        // - "dns" (currently not supported - indicates the host is also a dns server)
-        // - "proxy" (currently not supported - indicates the host is providing proxy services)
-        // - "remote" (host that is not on the local network and does not belong to the local network)
-        // - "device" (connected network device)
-        // - "client" (client host - where diagnostic is being run)
-        //
-        // if roles is an empty array then roles have not been discovered or
-        // no roles are known which probably indicates the host is just another
-        // client on the network such as a connected phone or desktop or laptop.
-        roles: [], // "nat", "gateway", "router", "dns", "public", "remote"
+    // no dns entries returns an empty dns object
+    //
+    // if it's not empty then all the fields will be present
+    // even if empty.
+    // Note: currently not implemented.
+    //dns: {},
 
-        // no dns entries returns an empty dns object
-        //
-        // if it's not empty then all the fields will be present
-        // even if empty.
-        // Note: currently not implemented.
-        //dns: {},
-
-        // geo only possibly available when the ip is public.
-        // no geo entries returns an empty geo object.
-        //
-        // if it's not empty then all the fields will be present
-        // even if those individual fields are empty.
-        geo: {},
-    };
+    // geo only possibly available when the ip is public.
+    // no geo entries returns an empty geo object.
+    //
+    // if it's not empty then all the fields will be present
+    // even if those individual fields are empty.
+    this.geo = {};
 }
 
-function newHostGeo() {
-    return {
-        city: "", // city
-        state: "", // state/region code
-        country: "", // country code
-        zip: "", // zip/postal code
-        lat: 0.00, // registered lat
-        lon: 0.00, // registered lon
-        org: "" // org name of the local network public ip is the isp.
-    };
+// HostGeo constructor
+function HostGeo() {
+    this.city = ""; // city
+    this.state = ""; // state/region code
+    this.country = ""; // country code
+    this.zip = ""; // zip/postal code
+    this.lat = 0.00; // registered lat
+    this.lon = 0.00; // registered lon
+    this.org = ""; // org name of the local network public ip is the isp.
 }
 
 // hostNameLookup will do a reverse dns lookup of the provided
@@ -122,7 +108,7 @@ function hostGeoLookup(hst, cb) {
             if (ipErr) {
                 cb(hst);
             } else {
-                hst.geo = newHostGeo();
+                hst.geo = new HostGeo();
                 hst.geo.city = geo.city;
                 hst.geo.state = geo.region_code;
                 hst.geo.country = geo.country;
@@ -199,7 +185,7 @@ function hostIpLookup(hst, cb) {
 // cb = (hst) => {}
 // hst == public internet host which is a host object
 function publicHost(cb) {
-    let hst = newHost();
+    let hst = new Host();
 
     // not currently marked with 'gateway' or 'nat' roles.
     // maybe consider changing the role designation and/or adding
@@ -227,7 +213,7 @@ function publicHost(cb) {
 // clientHost provides the client host information - current
 // active network interface.
 function clientHost(cb) {
-    let hst = newHost();
+    let hst = new Host();
     hst.roles = ["client"];
 
     network.get_active_interface((iErr, actInterface) => {
@@ -274,7 +260,7 @@ function client(cb) {
 // the outbound path to the internet. The nat
 // with the role 'gateway' is the internet gateway.
 function nats(cb) {
-    let h = newHost();
+    let h = new Host();
     h.ip = '8.8.8.8'; // google dns
 
     traceroute(h, (trErr, hops) => {
@@ -287,15 +273,15 @@ function nats(cb) {
             if (hops[i].is_public) {
                 break;
             } else {
-                let n = newHost(); // nat host
+                let n = new Host(); // nat host
 
-                // the inner nat will have the role of 'NAT' and 'Router'. The outermost
-                // nat will have the 'NAT', 'Router' and 'Gateway' roles. The 'gateway'
-                // in this case is being defined as the 'Gateway to the internet'.
+                // the inner nat will have the role of 'nat' and 'router'. The outermost
+                // nat will have the 'nat', 'router' and 'gateway' roles. The 'gateway'
+                // in this case is being defined as the 'gateway to the internet'.
                 // in the weird case that there is one or more NATs in-between
-                // the inner and internet gateway, the 'Router' and 'NAT' roles are assigned.
+                // the inner and internet gateway, the 'router' and 'nat' roles are assigned.
                 //
-                // all nats have the 'NAT' and 'Router' roles.
+                // all nats have the 'nat' and 'router' roles.
                 hops[i].roles = ["nat", "router"];
 
                 // delete extra hop fields
@@ -395,7 +381,7 @@ function localNetwork(cb) {
                 // translate 'devices' format to 'host' format
                 // and push to local host list.
                 for (let i = 0; i < devices.length; i++) {
-                    let h = newHost();
+                    let h = new Host();
                     let d = devices[i];
                     if (d.name !== "?") {
                         h.name = d.name;
@@ -469,7 +455,7 @@ function traceroute(destHst, cb) {
             packetSize: 64, // default: 16
             retries: 1,
             // sessionId: (process.pid % 65535),
-            // timeout: 2000,
+            timeout: 4000,
             // ttl: 128 // different than the maxHops ttl value.
         });
 
@@ -481,7 +467,7 @@ function traceroute(destHst, cb) {
             (error, target, ttl, sent, rcvd) => { // feed callback
                 // note: when error is not a TimeExeededError
                 // then its string value is the hop ip.
-                let hopHst = newHost();
+                let hopHst = new Host();
                 hopHst.ip = target;
 
                 let errMsg = "";
@@ -498,12 +484,16 @@ function traceroute(destHst, cb) {
                     }
                 }
 
-                let isPublic = false;
                 let latency = rcvd - sent;
 
                 // make sure the 'error' is a valid ip.
                 if (ip.isV4Format(hopHst.ip)) {
                     hopHst.is_public = ip.isPublic(hopHst.ip);
+                    if (hopHst.is_public) {
+                        hopHst.roles = ['remote'];
+                    } else {
+                        hopHst.roles = ['nat', 'router']
+                    }
                 } else {
                     hopHst.ip = "" // error value not an ip
                 }
@@ -547,7 +537,7 @@ function newPingsCfg() {
 // cb = (result) => {}
 function pings(pingsCfg, cb) {
     // create host to represent ping destination
-    let hst = newHost();
+    let hst = new Host();
     hst.roles = ['remote'];
 
     // check if target is ip address or host name.
@@ -763,8 +753,8 @@ function speed(stOptions) {
                     ping_ms: 0,
                     client_isp: '',
                     server_sponsor: '', // speed test server sponsor name
-                    client: newHost(),
-                    server: newHost(),
+                    client: new Host(),
+                    server: new Host(),
                 };
 
                 // extract and translate results
@@ -823,7 +813,8 @@ function speed(stOptions) {
     );
 }
 
-module.exports.newHost = newHost;
+module.exports.Host = Host;
+module.exports.HostGeo = HostGeo;
 module.exports.hostNameLookup = hostNameLookup;
 module.exports.hostIpLookup = hostIpLookup;
 module.exports.hostGeoLookup = hostGeoLookup;

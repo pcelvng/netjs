@@ -2,7 +2,7 @@ const net = require("../net.js");
 const util = require('util');
 
 // traceroute
-let destination = net.newHost();
+let destination = new net.Host();
 destination.name = "www.google.com";
 
 net.traceroute(destination, (err, hops) => {
