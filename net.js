@@ -553,9 +553,9 @@ function pings(pingsCfg, cb) {
         sent: 1, // num of pings sent; default is 1
         returned: 0, // num of returned pings
         loss: 0, // ping loss; sent - returned
-        min: 0, // min ping latency
-        max: 0, // max ping latency
-        avg: 0, // avg ping latency
+        min_latency: 0, // min ping latency
+        max_latency: 0, // max ping latency
+        avg_latency: 0, // avg ping latency
         jitter: 0, // jitter (std deviation) ping latency
         pings: [], // array of numeric values representing millisecond ping latency
     };
@@ -594,9 +594,9 @@ function pings(pingsCfg, cb) {
                         // stats
                         result.returned = result.pings.length;
                         result.loss = result.sent - result.returned;
-                        result.min = Math.min(...result.pings);
-                        result.max = Math.max(...result.pings);
-                        result.avg = (
+                        result.min_latency = Math.min(...result.pings);
+                        result.max_latency = Math.max(...result.pings);
+                        result.avg_latency = (
                             () => {
                                 let sum = 0.0;
                                 for (let i = 0; i < result.pings.length; i++) {
