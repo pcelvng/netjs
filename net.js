@@ -613,7 +613,7 @@ function pings(pingsCfg, cb) {
                             () => {
                                 let sumSq = 0.0; // diff around the mean squared and summed.
                                 for (let i = 0; i < result.pings.length; i++) {
-                                    sumSq += Math.pow(result.pings[i] - result.avg, 2);
+                                    sumSq += Math.pow(result.pings[i] - result.avg_latency, 2);
                                 }
 
                                 return Math.sqrt(sumSq /(result.pings.length-1)) // n = sample size - 1
