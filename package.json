@@ -1,6 +1,6 @@
 {
   "name": "@pcelvng/net",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "simple network diagnostic tool chest.",
   "homepage": "https://github.com/pcelvng/netjs",
   "repository": "github:pcelvng/netjs.git",
@@ -48,5 +48,6 @@
     "public-ip": "^2.4.0",
     "request": "^2.88.0",
     "speedtest-net": "^1.4.3"
-  }
+  },
+  "publishConfig":{"registry":"https://registry.npmjs.org/"}
 }
