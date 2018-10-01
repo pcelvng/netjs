@@ -517,11 +517,22 @@ function traceroute(destHst, cb) {
     });
 }
 
-function newPingsCfg() {
-    return {
-        target: '', // ping target; can be ip or hostname
-        num_pings: 1,
-    };
+function PingsCfg() {
+    this.target = ''; // ping target; can be ip or hostname
+    this.num_pings = 1;
+}
+
+function PingResult(pingHost = '') {
+    this.packet_size = 64; // for now not an option.
+    this.ping_host = pingHost; // destination host
+    this.sent = 1; // num of pings sent; default is 1
+    this.returned = 0; // num of returned pings
+    this.loss = 0; // ping loss; sent - returned
+    this.min_latency = 0; // min ping latency
+    this.max_latency = 0; // max ping latency
+    this.avg_latency = 0; // avg ping latency
+    this.jitter = 0; // jitter (std deviation) ping latency
+    this.pings = []; // array of numeric values representing millisecond ping latency
 }
 
 // pings is a utility to do any number of pings.
@@ -547,18 +558,7 @@ function pings(pingsCfg, cb) {
         hst.name = pingsCfg.target;
     }
 
-    let result = {
-        packet_size: 64, // for now not an option.
-        ping_host: hst, // destination host
-        sent: 1, // num of pings sent; default is 1
-        returned: 0, // num of returned pings
-        loss: 0, // ping loss; sent - returned
-        min_latency: 0, // min ping latency
-        max_latency: 0, // max ping latency
-        avg_latency: 0, // avg ping latency
-        jitter: 0, // jitter (std deviation) ping latency
-        pings: [], // array of numeric values representing millisecond ping latency
-    };
+    let result = new PingResult(hst);
 
     // numPings option
     if (typeof pingsCfg.num_pings === 'number') {
@@ -589,8 +589,17 @@ function pings(pingsCfg, cb) {
             let pa = () => {
                 session.pingHost(hst.ip, (error, target, sent, rcvd) => {
                     if (!error) {
-                        result.pings.push(rcvd - sent);
+                        let ms  = rcvd - sent;
+                        if (typeof ms === 'number') {
+                            result.pings.push(ms);
+                        }
+                    }
 
+                    // recurse pings until complete
+                    cnt++;
+                    if (cnt < result.sent) { // sent is the total intended to send.
+                        pa();
+                    } else {
                         // stats
                         result.returned = result.pings.length;
                         result.loss = result.sent - result.returned;
@@ -619,13 +628,7 @@ function pings(pingsCfg, cb) {
                                 return Math.sqrt(sumSq /(result.pings.length-1)) // n = sample size - 1
                             }
                         )();
-                    }
 
-                    // recurse pings until complete
-                    cnt++;
-                    if (cnt < result.sent) { // sent is the total intended to send.
-                        pa();
-                    } else {
                         cb(result);
                     }
                 })
@@ -639,7 +642,7 @@ function pings(pingsCfg, cb) {
 // ping is simple wrapper around pings. It just
 // does one ping.
 function ping(target, cb) {
-    let cfg = newPingsCfg();
+    let cfg = new PingsCfg();
     cfg.target = target;
     cfg.num_pings = 1;
 
@@ -677,9 +680,12 @@ function pingUrls(urls, cb) {
     let p = (url) => {
         return new Promise(
             (resolve, reject) => {
-                pingUrl(url, (err, url) => {
-                    // TODO: consider passing on err
-                    resolve(url);
+                pingUrl(url, (pErr, url) => {
+                    if (pErr) {
+                        reject(pErr);
+                    } else {
+                        resolve(url)
+                    }
                 });
             }
         );
@@ -819,7 +825,8 @@ module.exports.client = client;
 module.exports.nats = nats;
 module.exports.coreLocalNetwork = coreLocalNetwork;
 module.exports.localNetwork = localNetwork;
-module.exports.newPingsCfg = newPingsCfg;
+module.exports.PingsCfg = PingsCfg;
+module.exports.PingResult = PingResult;
 module.exports.pings = pings;
 module.exports.ping = ping;
 module.exports.pingUrl = pingUrl;

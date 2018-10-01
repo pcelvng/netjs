@@ -2,7 +2,7 @@ const net = require("../net.js");
 const util = require('util');
 
 // do a bunch of pings
-let cfg = net.newPingsCfg();
+let cfg = new net.PingsCfg();
 cfg.target = "www.google.com";
 cfg.num_pings = 10;
 net.pings(cfg, (result) => {
