@@ -10,6 +10,13 @@ client network environment.
 $ npm install @pcelvng/net --save
 ```
 
+## Node Webkit Installation
+
+Since the 'net-socket' dependency relies on a c module, Node Webkit requires that to be
+into the runtime environment. Instructions on doing this can be found below:
+
+[NWJS Use Native Node Modules](http://docs.nwjs.io/en/latest/For%20Users/Advanced/Use%20Native%20Node%20Modules/#for-non-lts-releases)
+
 ## Usage
 
 All usage examples are located in the examples directory. Examples 

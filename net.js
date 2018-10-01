@@ -647,33 +647,26 @@ function ping(target, cb) {
 }
 
 // pingUrl checks a single
-// http(s) endpoint for a 200 response.
+// http(s) endpoint and returns the endpoint
+// checked along with the returned http response code.
 //
 // Notes:
 // - only supports the GET action method at the moment.
-// - expects exactly a 200 response code.
 // - does not follow redirects.
-// - the promise is only resolved. 'reject' is not called
-//   so that a single fail or bad destination doesn't get
-//   in the way of other destination checks.
-// - can accept http or https.
 //
 // should be a complete url such as
 // "http://www.google.com/path?var1=value1"
 // "https://www.google.com/path"
-// cb = (err, url) => {}
+//
+// cb = (err, resp) => {}
+// resp = {url: 'url', response_code: 200}
 function pingUrl(url, cb) {
     request(url, (rErr, res, body) => {
-        if (rErr) {
-            cb(rErr, '');
-            return
+        let responseCode = 0;
+        if (res && res.statusCode) {
+            responseCode = res.statusCode;
         }
-
-        if (res && res.statusCode === 200) {
-            cb(null, url);
-        } else {
-            cb(null, '');
-        }
+        cb(rErr, {url: url, response_code: responseCode});
     });
 }
 
@@ -698,8 +691,8 @@ function pingUrls(urls, cb) {
     }
 
     Promise.all(promises).then(
-        urls => {
-            cb(null, urls);
+        urlObjs => {
+            cb(null, urlObjs);
         }
     ).catch(
         pErr => {
