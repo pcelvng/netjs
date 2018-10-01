@@ -5,6 +5,7 @@ const util = require('util');
 // and especially the core local network hosts.
 net.localNetwork((hsts) => {
     for (let i = 0; i < hsts.length; i++) {
-        console.log(util.inspect(hsts[i], false, null, true));
+        // console.log(util.inspect(hsts[i], false, null, true));
+        console.log(JSON.stringify(hsts[i]));
     }
 });

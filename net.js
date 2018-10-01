@@ -419,7 +419,19 @@ function localNetwork(cb) {
                     // vendor lookup is rate limited to 1 per second.
                 }
 
-                cb(hsts);
+                // dedup - for some reason seeing a lot of dups
+                let dedupedKeys = {};
+                for (let i = 0; i < hsts.length; i++) {
+                    dedupedKeys[hsts[i].ip + hsts[i].mac] = hsts[i];
+                }
+                let deduped = [];
+                for (var key in dedupedKeys) {
+                    if (dedupedKeys.hasOwnProperty(key)) {
+                        deduped.push(dedupedKeys[key]);
+                    }
+                }
+
+                cb(deduped);
             }
         ).catch(
             lErr => {
