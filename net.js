@@ -4,12 +4,13 @@ const os = require("os");
 const ip = require('ip');
 const iplocation = require('iplocation');
 const localdevices =  require('local-devices');
-const netping = require ("net-ping");
 const network = require('network');
 const arp = require('node-arp');
 const publicIp = require('public-ip');
 const speedtestNet = require('speedtest-net');
 const request = require('request');
+const tcpping = require('tcp-ping');
+const Traceroute = require('nodejs-traceroute');
 
 // Host constructor
 function Host() {
@@ -459,84 +460,73 @@ function localNetwork(cb) {
 function traceroute(destHst, cb) {
     let hops = []; // array of hosts with 'latency' and 'ttl' fields added.
 
-    // lookup destHst.ip
-    hostIpLookup(destHst, (destHst) => {
-        // initialize netping session
-        let session = netping.createSession({
-            // networkProtocol: netping.NetworkProtocol.IPv4,
-            packetSize: 64, // default: 16
-            retries: 1,
-            // sessionId: (process.pid % 65535),
-            timeout: 4000,
-            // ttl: 128 // different than the maxHops ttl value.
-        });
+    try {
+        let tracer = new Traceroute();
 
-        session.on('error', (sErr) => {
-            cb(sErr, hops);
-        });
-
-        session.traceRoute(destHst.ip, 64, // maxHops = 64 // plenty
-            (error, target, ttl, sent, rcvd) => { // feed callback
-                // note: when error is not a TimeExeededError
-                // then its string value is the hop ip.
+        tracer
+        .on('hop', (hop) => {
+            if (ip.isV4Format(hop.ip)) {
                 let hopHst = new Host();
-                hopHst.ip = target;
+                hopHst.ip = hop.ip;
+                hopHst.is_public = ip.isPublic(hopHst.ip);
 
-                let errMsg = "";
-                if (error) {
-                    hopHst.ip = error.source; // most of the time it's a TimeExceededError
+                if (hopHst.is_public) {
+                    hopHst.roles = ['remote'];
+                } else {
+                    hopHst.roles = ['nat', 'router']
+                }
 
-                    if (!(error instanceof netping.TimeExceededError)) {
-                        errMsg = error.message;
-
-                        // in case the error.message is empty.
-                        if (errMsg === "") {
-                            errMsg = error.toString();
+                // extra special host fields
+                if (hop.rtt1 === "<1 ms") {
+                    hopHst.latency = 1;
+                } else if (hop.rtt1 === "*") {
+                    hopHst.latency = 0; // probabl won't happen since host.ip won't be valid
+                } else {
+                    // expecting format of "10 ms"
+                    let pieces = hop.rtt1.split(" ");
+                    if (pieces.length > 0) {
+                        hopHst.latency = Number(pieces[0]);
+                        if (isNaN(hopHst.latency)) {
+                            hopHst.latency = 0;
                         }
                     }
                 }
 
-                let latency = rcvd - sent;
+                hopHst.ttl = hop.hop;
 
-                // make sure the 'error' is a valid ip.
-                if (ip.isV4Format(hopHst.ip)) {
-                    hopHst.is_public = ip.isPublic(hopHst.ip);
-                    if (hopHst.is_public) {
-                        hopHst.roles = ['remote'];
-                    } else {
-                        hopHst.roles = ['nat', 'router']
-                    }
-                } else {
-                    hopHst.ip = "" // error value not an ip
-                }
+                // only hops where information
+                // could be collected is pushed.
+                hops.push(hopHst);
+            }
+        })
+        .on('close', () => {
+            // TODO: consider adding geo
+            // TODO: consider adding host name lookup
+            cb(null, hops);
+        });
 
-                // extra special host fields
-                hopHst.latency = latency;
-                hopHst.ttl = ttl;
-                hopHst.err_msg = errMsg;
-
-                hops.push(hopHst); // add hop host
-            },
-            (trErr, target) => { // done callback
-                if (trErr) {
-                    cb(null, hops);
-                } else {
-                    // TODO: consider adding geo
-                    // TODO: consider adding host name lookup
-                    cb(null, hops);
-                }
-            });
-    });
+        let dest = "";
+        if (destHst.name.length > 0) {
+            dest = destHst.name;
+        } else {
+            dest = destHst.ip;
+        }
+        tracer.trace(dest);
+    } catch (ex) {
+        cb(ex, hops);
+    }
 }
 
 function PingsCfg() {
     this.target = ''; // ping target; can be ip or hostname
+    this.port = 80; // default port 80
     this.num_pings = 1;
 }
 
-function PingResult(pingHost = '') {
+function PingResult(pingHost = '', port = 80) {
     this.packet_size = 64; // for now not an option.
     this.ping_host = pingHost; // destination host
+    this.ping_port = 80;
     this.sent = 1; // num of pings sent; default is 1
     this.returned = 0; // num of returned pings
     this.loss = 0; // ping loss; sent - returned
@@ -558,6 +548,102 @@ function PingResult(pingHost = '') {
 //   results.ip will contain the same value.
 //
 // cb = (result) => {}
+// function pings(pingsCfg, cb) {
+//     // create host to represent ping destination
+//     let hst = new Host();
+//     hst.roles = ['remote'];
+//
+//     // check if target is ip address or host name.
+//     if (ip.isV4Format(pingsCfg.target)) {
+//         hst.ip = pingsCfg.target;
+//     } else {
+//         hst.name = pingsCfg.target;
+//     }
+//
+//     let result = new PingResult(hst);
+//
+//     // numPings option
+//     if (typeof pingsCfg.num_pings === 'number') {
+//         // numPings must at least be 1 or greater.
+//         if (pingsCfg.num_pings > 0) {
+//             result.sent = pingsCfg.num_pings;
+//         }
+//     }
+//
+//     // get the target host ip - if needed
+//     // not going to bother with reverse lookup.
+//     hostIpLookup(hst, (hst) => {
+//         hst.is_public = ip.isPublic();
+//
+//         // dest host geo lookup
+//         hostGeoLookup(hst, (hst) => {
+//             // initialize ping session
+//             let session = netping.createSession({
+//                 // networkProtocol: ping.NetworkProtocol.IPv4,
+//                 packetSize: result.packetSize, // default: 16
+//                 retries: 0, // if not 0 then there appears to be weird side effects
+//                 // sessionId: (process.pid % 65535),
+//                 // timeout: 2000,
+//                 // ttl: 128
+//             });
+//
+//             let cnt = 0;
+//             let pa = () => {
+//                 session.pingHost(hst.ip, (error, target, sent, rcvd) => {
+//                     if (!error) {
+//                         let ms  = rcvd - sent;
+//                         if (typeof ms === 'number') {
+//                             result.pings.push(ms);
+//                         }
+//                     }
+//
+//                     // recurse pings until complete
+//                     cnt++;
+//                     if (cnt < result.sent) { // sent is the total intended to send.
+//                         pa();
+//                     } else {
+//                         // stats
+//                         result.returned = result.pings.length;
+//                         result.loss = result.sent - result.returned;
+//                         result.min_latency = Math.min(...result.pings);
+//                         result.max_latency = Math.max(...result.pings);
+//                         result.avg_latency = (
+//                             () => {
+//                                 let sum = 0.0;
+//                                 for (let i = 0; i < result.pings.length; i++) {
+//                                     sum += result.pings[i];
+//                                 }
+//
+//                                 return sum/result.pings.length;
+//                             }
+//                         )();
+//
+//                         // jitter is just a sample standard deviation
+//                         // note: if there is just one ping then jitter is NaN.
+//                         result.jitter = (
+//                             () => {
+//                                 let sumSq = 0.0; // diff around the mean squared and summed.
+//                                 for (let i = 0; i < result.pings.length; i++) {
+//                                     sumSq += Math.pow(result.pings[i] - result.avg_latency, 2);
+//                                 }
+//
+//                                 return Math.sqrt(sumSq /(result.pings.length-1)) // n = sample size - 1
+//                             }
+//                         )();
+//
+//                         cb(result);
+//                     }
+//                 })
+//             };
+//
+//             pa();
+//         });
+//     });
+// }
+
+// pings will do a series of tcp based pings. Default port
+// is port 80. In tests on windows 10 it seems to hang if the
+// port is wrong.
 function pings(pingsCfg, cb) {
     // create host to represent ping destination
     let hst = new Host();
@@ -587,62 +673,48 @@ function pings(pingsCfg, cb) {
 
         // dest host geo lookup
         hostGeoLookup(hst, (hst) => {
-            // initialize ping session
-            let session = netping.createSession({
-                // networkProtocol: ping.NetworkProtocol.IPv4,
-                packetSize: result.packetSize, // default: 16
-                retries: 0, // if not 0 then there appears to be weird side effects
-                // sessionId: (process.pid % 65535),
-                // timeout: 2000,
-                // ttl: 128
-            });
-
             let cnt = 0;
             let pa = () => {
-                session.pingHost(hst.ip, (error, target, sent, rcvd) => {
-                    if (!error) {
-                        let ms  = rcvd - sent;
-                        if (typeof ms === 'number') {
-                            result.pings.push(ms);
+                tcpping.ping({
+                    address: hst.ip,
+                    port: pingsCfg.port,
+                    attempts: pingsCfg.num_pings
+                }, (error, pRslt) => {
+                    // translate ping times
+                    pRslt.results.forEach((p) => {
+                       result.pings.push(p.time);
+                    });
+
+                    // stats
+                    result.returned = result.pings.length;
+                    result.loss = result.sent - result.returned;
+                    result.min_latency = Math.min(...result.pings);
+                    result.max_latency = Math.max(...result.pings);
+                    result.avg_latency = (
+                        () => {
+                            let sum = 0.0;
+                            for (let i = 0; i < result.pings.length; i++) {
+                                sum += result.pings[i];
+                            }
+
+                            return sum/result.pings.length;
                         }
-                    }
+                    )();
 
-                    // recurse pings until complete
-                    cnt++;
-                    if (cnt < result.sent) { // sent is the total intended to send.
-                        pa();
-                    } else {
-                        // stats
-                        result.returned = result.pings.length;
-                        result.loss = result.sent - result.returned;
-                        result.min_latency = Math.min(...result.pings);
-                        result.max_latency = Math.max(...result.pings);
-                        result.avg_latency = (
-                            () => {
-                                let sum = 0.0;
-                                for (let i = 0; i < result.pings.length; i++) {
-                                    sum += result.pings[i];
-                                }
-
-                                return sum/result.pings.length;
+                    // jitter is just a sample standard deviation
+                    // note: if there is just one ping then jitter is NaN.
+                    result.jitter = (
+                        () => {
+                            let sumSq = 0.0; // diff around the mean squared and summed.
+                            for (let i = 0; i < result.pings.length; i++) {
+                                sumSq += Math.pow(result.pings[i] - result.avg_latency, 2);
                             }
-                        )();
 
-                        // jitter is just a sample standard deviation
-                        // note: if there is just one ping then jitter is NaN.
-                        result.jitter = (
-                            () => {
-                                let sumSq = 0.0; // diff around the mean squared and summed.
-                                for (let i = 0; i < result.pings.length; i++) {
-                                    sumSq += Math.pow(result.pings[i] - result.avg_latency, 2);
-                                }
+                            return Math.sqrt(sumSq /(result.pings.length-1)) // n = sample size - 1
+                        }
+                    )();
 
-                                return Math.sqrt(sumSq /(result.pings.length-1)) // n = sample size - 1
-                            }
-                        )();
-
-                        cb(result);
-                    }
+                    cb(error, result);
                 })
             };
 
@@ -652,10 +724,11 @@ function pings(pingsCfg, cb) {
 }
 
 // ping is simple wrapper around pings. It just
-// does one ping.
+// does one ping on default port 80.
 function ping(target, cb) {
     let cfg = new PingsCfg();
     cfg.target = target;
+    cfg.port = 80;
     cfg.num_pings = 1;
 
     pings(cfg, cb);

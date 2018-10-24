@@ -5,13 +5,22 @@ const util = require('util');
 let cfg = new net.PingsCfg();
 cfg.target = "www.google.com";
 cfg.num_pings = 10;
-net.pings(cfg, (result) => {
+cfg.port = 443; // default is port 80
+net.pings(cfg, (err, result) => {
+    if (err) {
+        console.log(err.toString());
+    }
     console.log('do a bunch of pings and get stats');
     console.log(util.inspect(result, false, null, true));
     console.log('');
 });
 
-net.ping("www.google.com", (result) => {
+// do just one ping
+net.ping("www.google.com", (err, result) => {
+    if (err) {
+        console.log(err.toString());
+    }
+
     console.log('do a single ping');
     console.log(util.inspect(result, false, null, true));
     console.log('');
