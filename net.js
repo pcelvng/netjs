@@ -526,7 +526,7 @@ function PingsCfg() {
 function PingResult(pingHost = '', port = 80) {
     this.packet_size = 64; // for now not an option.
     this.ping_host = pingHost; // destination host
-    this.ping_port = 80;
+    this.ping_port = port;
     this.sent = 1; // num of pings sent; default is 1
     this.returned = 0; // num of returned pings
     this.loss = 0; // ping loss; sent - returned
@@ -537,113 +537,10 @@ function PingResult(pingHost = '', port = 80) {
     this.pings = []; // array of numeric values representing millisecond ping latency
 }
 
-// pings is a utility to do any number of pings.
-// module.exports.pings = doPings;
-// - make sure to leave the http:// or https:// off of the address. So, instead of 'https://www.google.com'
-//   do 'www.google.com'. If it's not in the correct format then the callback will provide an error.
-// - make sure to leave off trailing paths ie don't do 'finance.yahoo.com/portfolios' but instead 'finance.yahoo.com/'.
-// - make sure to remove trailing slashes; ie don't do 'finance.yahoo.com/' but rather 'finance.yahoo.com'.
-// - make sure not provide a port; ie instead of 'www.google.com:80' just do 'www.google.com'.
-// - can provide just an ip address; ie '172.217.4.164' is just fine. If that's the case then the results.host and
-//   results.ip will contain the same value.
-//
-// cb = (result) => {}
-// function pings(pingsCfg, cb) {
-//     // create host to represent ping destination
-//     let hst = new Host();
-//     hst.roles = ['remote'];
-//
-//     // check if target is ip address or host name.
-//     if (ip.isV4Format(pingsCfg.target)) {
-//         hst.ip = pingsCfg.target;
-//     } else {
-//         hst.name = pingsCfg.target;
-//     }
-//
-//     let result = new PingResult(hst);
-//
-//     // numPings option
-//     if (typeof pingsCfg.num_pings === 'number') {
-//         // numPings must at least be 1 or greater.
-//         if (pingsCfg.num_pings > 0) {
-//             result.sent = pingsCfg.num_pings;
-//         }
-//     }
-//
-//     // get the target host ip - if needed
-//     // not going to bother with reverse lookup.
-//     hostIpLookup(hst, (hst) => {
-//         hst.is_public = ip.isPublic();
-//
-//         // dest host geo lookup
-//         hostGeoLookup(hst, (hst) => {
-//             // initialize ping session
-//             let session = netping.createSession({
-//                 // networkProtocol: ping.NetworkProtocol.IPv4,
-//                 packetSize: result.packetSize, // default: 16
-//                 retries: 0, // if not 0 then there appears to be weird side effects
-//                 // sessionId: (process.pid % 65535),
-//                 // timeout: 2000,
-//                 // ttl: 128
-//             });
-//
-//             let cnt = 0;
-//             let pa = () => {
-//                 session.pingHost(hst.ip, (error, target, sent, rcvd) => {
-//                     if (!error) {
-//                         let ms  = rcvd - sent;
-//                         if (typeof ms === 'number') {
-//                             result.pings.push(ms);
-//                         }
-//                     }
-//
-//                     // recurse pings until complete
-//                     cnt++;
-//                     if (cnt < result.sent) { // sent is the total intended to send.
-//                         pa();
-//                     } else {
-//                         // stats
-//                         result.returned = result.pings.length;
-//                         result.loss = result.sent - result.returned;
-//                         result.min_latency = Math.min(...result.pings);
-//                         result.max_latency = Math.max(...result.pings);
-//                         result.avg_latency = (
-//                             () => {
-//                                 let sum = 0.0;
-//                                 for (let i = 0; i < result.pings.length; i++) {
-//                                     sum += result.pings[i];
-//                                 }
-//
-//                                 return sum/result.pings.length;
-//                             }
-//                         )();
-//
-//                         // jitter is just a sample standard deviation
-//                         // note: if there is just one ping then jitter is NaN.
-//                         result.jitter = (
-//                             () => {
-//                                 let sumSq = 0.0; // diff around the mean squared and summed.
-//                                 for (let i = 0; i < result.pings.length; i++) {
-//                                     sumSq += Math.pow(result.pings[i] - result.avg_latency, 2);
-//                                 }
-//
-//                                 return Math.sqrt(sumSq /(result.pings.length-1)) // n = sample size - 1
-//                             }
-//                         )();
-//
-//                         cb(result);
-//                     }
-//                 })
-//             };
-//
-//             pa();
-//         });
-//     });
-// }
-
 // pings will do a series of tcp based pings. Default port
 // is port 80. In tests on windows 10 it seems to hang if the
 // port is wrong.
+// cb = (error, results) => {}
 function pings(pingsCfg, cb) {
     // create host to represent ping destination
     let hst = new Host();
@@ -656,7 +553,7 @@ function pings(pingsCfg, cb) {
         hst.name = pingsCfg.target;
     }
 
-    let result = new PingResult(hst);
+    let result = new PingResult(hst, pingsCfg.port);
 
     // numPings option
     if (typeof pingsCfg.num_pings === 'number') {
