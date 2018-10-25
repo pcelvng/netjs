@@ -575,7 +575,8 @@ function pings(pingsCfg, cb) {
                 tcpping.ping({
                     address: hst.ip,
                     port: pingsCfg.port,
-                    attempts: pingsCfg.num_pings
+                    attempts: pingsCfg.num_pings,
+                    timeout: 1000,
                 }, (error, pRslt) => {
                     // translate ping times
                     pRslt.results.forEach((p) => {
