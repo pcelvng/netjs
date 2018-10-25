@@ -572,48 +572,61 @@ function pings(pingsCfg, cb) {
         hostGeoLookup(hst, (hst) => {
             let cnt = 0;
             let pa = () => {
-                tcpping.ping({
-                    address: hst.ip,
-                    port: pingsCfg.port,
-                    attempts: pingsCfg.num_pings,
-                    timeout: 1000,
-                }, (error, pRslt) => {
-                    // translate ping times
-                    pRslt.results.forEach((p) => {
-                       result.pings.push(p.time);
-                    });
+                // quick check that the ip:port exists and is taking ping traffic.
+                tcpping.ping({ address: hst.ip, port: pingsCfg.port, attempts: 1, timeout: 250 }, (probeErr, probeRslt) => {
+                    if (probeErr) {
+                        cb(probeErr, result);
+                        return
+                    }
 
-                    // stats
-                    result.returned = result.pings.length;
-                    result.loss = result.sent - result.returned;
-                    result.min_latency = Math.min(...result.pings);
-                    result.max_latency = Math.max(...result.pings);
-                    result.avg_latency = (
-                        () => {
-                            let sum = 0.0;
-                            for (let i = 0; i < result.pings.length; i++) {
-                                sum += result.pings[i];
-                            }
+                    let available = probeRslt.min !== undefined;
+                    if (available) {
+                        tcpping.ping({
+                            address: hst.ip,
+                            port: pingsCfg.port,
+                            attempts: pingsCfg.num_pings,
+                            timeout: 1000,
+                        }, (error, pRslt) => {
+                            // translate ping times
+                            pRslt.results.forEach((p) => {
+                                result.pings.push(p.time);
+                            });
 
-                            return sum/result.pings.length;
-                        }
-                    )();
+                            // stats
+                            result.returned = result.pings.length;
+                            result.loss = result.sent - result.returned;
+                            result.min_latency = Math.min(...result.pings);
+                            result.max_latency = Math.max(...result.pings);
+                            result.avg_latency = (
+                                () => {
+                                    let sum = 0.0;
+                                    for (let i = 0; i < result.pings.length; i++) {
+                                        sum += result.pings[i];
+                                    }
 
-                    // jitter is just a sample standard deviation
-                    // note: if there is just one ping then jitter is NaN.
-                    result.jitter = (
-                        () => {
-                            let sumSq = 0.0; // diff around the mean squared and summed.
-                            for (let i = 0; i < result.pings.length; i++) {
-                                sumSq += Math.pow(result.pings[i] - result.avg_latency, 2);
-                            }
+                                    return sum/result.pings.length;
+                                }
+                            )();
 
-                            return Math.sqrt(sumSq /(result.pings.length-1)) // n = sample size - 1
-                        }
-                    )();
+                            // jitter is just a sample standard deviation
+                            // note: if there is just one ping then jitter is NaN.
+                            result.jitter = (
+                                () => {
+                                    let sumSq = 0.0; // diff around the mean squared and summed.
+                                    for (let i = 0; i < result.pings.length; i++) {
+                                        sumSq += Math.pow(result.pings[i] - result.avg_latency, 2);
+                                    }
 
-                    cb(error, result);
-                })
+                                    return Math.sqrt(sumSq /(result.pings.length-1)) // n = sample size - 1
+                                }
+                            )();
+
+                            cb(error, result);
+                        })
+                    } else {
+                        cb(new Error("could not reach address"), result);
+                    }
+                });
             };
 
             pa();
