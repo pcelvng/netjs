@@ -5,7 +5,7 @@ const util = require('util');
 let cfg = new net.PingsCfg();
 cfg.target = "www.google.com";
 cfg.num_pings = 10;
-cfg.port = 443; // default is port 80
+cfg.port = 500; // default is port 80
 net.pings(cfg, (err, result) => {
     if (err) {
         console.log(err.toString());
