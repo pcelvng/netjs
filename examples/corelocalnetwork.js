@@ -34,7 +34,12 @@ net.nats((nts) => {
 // is public.
 // Other public hosts are designated with the 'remote' role. Meaning
 // they are remote to the client's local network.
-net.publicHost((pHst) => {
+net.publicHost((phErr, pHst) => {
+    if (phErr) {
+        console.log("public host error:");
+        console.log(phErr.toString());
+    }
+
     console.log("public host: ");
     console.log(util.inspect(pHst, false, null, true));
     console.log("");
@@ -42,6 +47,10 @@ net.publicHost((pHst) => {
 
 // conveniently get the entire 'core local network'
 // in a single call.
-net.coreLocalNetwork((hsts) => {
+net.coreLocalNetwork((lnErr, hsts) => {
+    if (lnErr) {
+        console.log("local network error:");
+        console.log(lnErr.toString());
+    }
     console.log(util.inspect(hsts, false, null, true));
 });
