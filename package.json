@@ -1,6 +1,6 @@
 {
   "name": "@pcelvng/net",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "simple network diagnostic tool chest.",
   "homepage": "https://github.com/pcelvng/netjs",
   "repository": "github:pcelvng/netjs.git",
@@ -39,13 +39,13 @@
   },
   "dependencies": {
     "address": "^1.0.3",
+    "external-ip": "^2.0.3",
     "ip": "^1.1.5",
     "iplocation": "^5.0.1",
     "local-devices": "^1.1.1",
     "network": "^0.4.1",
     "node-arp": "^1.0.6",
     "nodejs-traceroute": "^1.1.1",
-    "public-ip": "^2.4.0",
     "request": "^2.88.0",
     "speedtest-net": "^1.4.3",
     "tcp-ping": "^0.1.1"
