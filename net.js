@@ -371,6 +371,11 @@ function coreLocalNetwork(cb) {
     });
 }
 
+// localNetwork will get as much localnetwork connected
+// device imformation as it can. Tries to present a list
+// of all connected devices. It is a superset of coreLocalNetwork
+//
+// let cb = (error, hosts) => {}
 function localNetwork(cb) {
     coreLocalNetwork((lnErr, hsts) => {
         let coreCnt = hsts.length;
@@ -431,11 +436,11 @@ function localNetwork(cb) {
                     }
                 }
 
-                cb(deduped);
+                cb(lnErr, deduped);
             }
         ).catch(
             lErr => {
-                cb(hsts);
+                cb(lErr, hsts);
             }
         );
     });
