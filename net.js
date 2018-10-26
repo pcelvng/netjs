@@ -183,7 +183,7 @@ function hostIpLookup(hst, cb) {
 // public ip. It is the 'public' side of the internet gateway host.
 // geo info lookup is included.
 //
-// cb = (hst) => {}
+// cb = (error, hst) => {}
 // hst == public internet host which is a host object
 function publicHost(cb) {
     let hst = new Host();
@@ -200,14 +200,13 @@ function publicHost(cb) {
 
         // reverse dns lookup to discover a host name
         hostNameLookup(hst, (hst) => {
+            // geo lookup
             hostGeoLookup(hst, (hst) => {
-                cb(hst);
+                cb(null, hst);
             })
         })
-
-        // geo lookup
     }).catch(err => {
-        cb(hst);
+        cb(err, hst);
     });
 }
 
@@ -349,14 +348,14 @@ function nats(cb) {
 // - other routers
 // - client dns hosts (dns hosts the client is currently using)
 //
-// cb = (hsts) => {}
+// cb = (error, hsts) => {}
 // callback function simply returns an array of hosts.
 function coreLocalNetwork(cb) {
     let hsts = [];
 
     // obtain public internet host - the public face of the local
     // network.
-    publicHost((hst) => {
+    publicHost((phErr, hst) => {
         hsts.push(hst);
 
         // client host
@@ -366,14 +365,14 @@ function coreLocalNetwork(cb) {
             // nats/gateways
             nats((nts) => {
                 hsts.push(...nts);
-                cb(hsts);
+                cb(phErr, hsts);
             });
         })
     });
 }
 
 function localNetwork(cb) {
-    coreLocalNetwork((hsts) => {
+    coreLocalNetwork((lnErr, hsts) => {
         let coreCnt = hsts.length;
 
         // add remaining misc nodes
