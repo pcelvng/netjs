@@ -6,7 +6,7 @@ const iplocation = require('iplocation');
 const localdevices =  require('local-devices');
 const network = require('network');
 const arp = require('node-arp');
-const publicIp = require('public-ip');
+const getIP = require('external-ip')();
 const speedtestNet = require('speedtest-net');
 const request = require('request');
 const tcpping = require('tcp-ping');
@@ -193,20 +193,21 @@ function publicHost(cb) {
     // roles.
     hst.roles = ['public'];
 
-    // get public ip first
-    publicIp.v4().then(pubip => {
-        hst.ip = pubip;
+    getIP((ipErr, pubIp) => {
+        hst.ip = pubIp;
         hst.is_public = true;
 
-        // reverse dns lookup to discover a host name
-        hostNameLookup(hst, (hst) => {
-            // geo lookup
-            hostGeoLookup(hst, (hst) => {
-                cb(null, hst);
-            })
-        })
-    }).catch(err => {
-        cb(err, hst);
+        if (ipErr) {
+            cb(ipErr, hst);
+        } else {
+            // reverse dns lookup to discover a host name
+            hostNameLookup(hst, (hst) => {
+                // geo lookup
+                hostGeoLookup(hst, (hst) => {
+                    cb(null, hst);
+                })
+            });
+        }
     });
 }
 
